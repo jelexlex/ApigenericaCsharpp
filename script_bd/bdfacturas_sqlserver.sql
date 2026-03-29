@@ -23,6 +23,16 @@ IF OBJECT_ID('sp_consultar_factura_y_productosporfactura', 'P') IS NOT NULL DROP
 IF OBJECT_ID('sp_listar_facturas_y_productosporfactura', 'P') IS NOT NULL DROP PROCEDURE sp_listar_facturas_y_productosporfactura;
 IF OBJECT_ID('sp_actualizar_factura_y_productosporfactura', 'P') IS NOT NULL DROP PROCEDURE sp_actualizar_factura_y_productosporfactura;
 IF OBJECT_ID('sp_borrar_factura_y_productosporfactura', 'P') IS NOT NULL DROP PROCEDURE sp_borrar_factura_y_productosporfactura;
+IF OBJECT_ID('crear_usuario_con_roles', 'P') IS NOT NULL DROP PROCEDURE crear_usuario_con_roles;
+IF OBJECT_ID('actualizar_usuario_con_roles', 'P') IS NOT NULL DROP PROCEDURE actualizar_usuario_con_roles;
+IF OBJECT_ID('eliminar_usuario_con_roles', 'P') IS NOT NULL DROP PROCEDURE eliminar_usuario_con_roles;
+IF OBJECT_ID('actualizar_roles_usuario', 'P') IS NOT NULL DROP PROCEDURE actualizar_roles_usuario;
+IF OBJECT_ID('consultar_usuario_con_roles', 'P') IS NOT NULL DROP PROCEDURE consultar_usuario_con_roles;
+IF OBJECT_ID('listar_usuarios_con_roles', 'P') IS NOT NULL DROP PROCEDURE listar_usuarios_con_roles;
+IF OBJECT_ID('verificar_acceso_ruta', 'P') IS NOT NULL DROP PROCEDURE verificar_acceso_ruta;
+IF OBJECT_ID('listar_rutarol', 'P') IS NOT NULL DROP PROCEDURE listar_rutarol;
+IF OBJECT_ID('crear_rutarol', 'P') IS NOT NULL DROP PROCEDURE crear_rutarol;
+IF OBJECT_ID('eliminar_rutarol', 'P') IS NOT NULL DROP PROCEDURE eliminar_rutarol;
 GO
 
 -- Tablas dependientes primero
@@ -73,9 +83,11 @@ CREATE TABLE rol (
 );
 
 CREATE TABLE ruta (
+    id INT IDENTITY(1,1) NOT NULL,
     ruta VARCHAR(100) NOT NULL,
     descripcion VARCHAR(200) NOT NULL,
-    CONSTRAINT pk_ruta PRIMARY KEY (ruta)
+    CONSTRAINT pk_ruta PRIMARY KEY (id),
+    CONSTRAINT uq_ruta UNIQUE (ruta)
 );
 
 CREATE TABLE usuario (
@@ -138,9 +150,11 @@ CREATE TABLE rol_usuario (
 );
 
 CREATE TABLE rutarol (
-    ruta VARCHAR(100) NOT NULL,
-    rol VARCHAR(50) NOT NULL,
-    CONSTRAINT pk_rutarol PRIMARY KEY (ruta, rol)
+    fkidruta INT NOT NULL,
+    fkidrol INT NOT NULL,
+    CONSTRAINT pk_rutarol PRIMARY KEY (fkidruta, fkidrol),
+    CONSTRAINT fk_rutarol_ruta FOREIGN KEY (fkidruta) REFERENCES ruta(id) ON DELETE CASCADE,
+    CONSTRAINT fk_rutarol_rol FOREIGN KEY (fkidrol) REFERENCES rol(id) ON DELETE CASCADE
 );
 GO
 
@@ -405,7 +419,7 @@ BEGIN
         BEGIN
             CLOSE producto_cursor;
             DEALLOCATE producto_cursor;
-        END
+        END;
 
         -- Relanzar el error original (del trigger u otro)
         THROW;
@@ -668,7 +682,7 @@ BEGIN
         BEGIN
             CLOSE producto_cursor;
             DEALLOCATE producto_cursor;
-        END
+        END;
 
         THROW;
     END CATCH
@@ -732,6 +746,497 @@ BEGIN
 
         THROW;
     END CATCH
+END;
+GO
+
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS - USUARIOS CON ROLES
+-- Nota: El cifrado lo hace la API C# con el parámetro camposEncriptar
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 6. SP CREAR USUARIO CON ROLES
+-- Recibe: email, contraseña y JSON array de roles [{"fkidrol":1},...]
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "crear_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_contrasena": "pass123",
+--     "p_roles_json": "[{\"fkidrol\":1},{\"fkidrol\":2}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE crear_usuario_con_roles
+    @p_email VARCHAR(100),
+    @p_contrasena VARCHAR(200),
+    @p_roles_json NVARCHAR(MAX),
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @v_idrol INT;
+    DECLARE @v_roles_json NVARCHAR(MAX);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Insertar el usuario
+        INSERT INTO usuario (email, contrasena) VALUES (@p_email, @p_contrasena);
+
+        -- Insertar los roles del usuario
+        DECLARE rol_cursor CURSOR LOCAL FAST_FORWARD FOR
+            SELECT CAST(JSON_VALUE(value, '$.fkidrol') AS INT)
+            FROM OPENJSON(@p_roles_json);
+
+        OPEN rol_cursor;
+        FETCH NEXT FROM rol_cursor INTO @v_idrol;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (@p_email, @v_idrol);
+            FETCH NEXT FROM rol_cursor INTO @v_idrol;
+        END
+
+        CLOSE rol_cursor;
+        DEALLOCATE rol_cursor;
+
+        -- Retornar resultado como JSON
+        SELECT @v_roles_json = (
+            SELECT r.id AS idrol, r.nombre
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = @p_email
+            FOR JSON PATH
+        );
+
+        SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        IF CURSOR_STATUS('local', 'rol_cursor') >= 0
+        BEGIN
+            CLOSE rol_cursor;
+            DEALLOCATE rol_cursor;
+        END;
+
+        THROW;
+    END CATCH
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 7. SP ACTUALIZAR USUARIO CON ROLES
+-- Actualiza contraseña (si no está vacía) y reemplaza roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "actualizar_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_contrasena": "newpass",
+--     "p_roles": "[{\"fkidrol\":1},{\"fkidrol\":3}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE actualizar_usuario_con_roles
+    @p_email VARCHAR(100),
+    @p_contrasena VARCHAR(200),
+    @p_roles NVARCHAR(MAX),
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @v_idrol INT;
+    DECLARE @v_roles_json NVARCHAR(MAX);
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Actualizar la contraseña solo si no está vacía
+        IF @p_contrasena IS NOT NULL AND @p_contrasena != ''
+            UPDATE usuario SET contrasena = @p_contrasena WHERE email = @p_email;
+
+        -- Eliminar los roles anteriores
+        DELETE FROM rol_usuario WHERE fkemail = @p_email;
+
+        -- Insertar los nuevos roles
+        DECLARE rol_cursor CURSOR LOCAL FAST_FORWARD FOR
+            SELECT CAST(JSON_VALUE(value, '$.fkidrol') AS INT)
+            FROM OPENJSON(@p_roles);
+
+        OPEN rol_cursor;
+        FETCH NEXT FROM rol_cursor INTO @v_idrol;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (@p_email, @v_idrol);
+            FETCH NEXT FROM rol_cursor INTO @v_idrol;
+        END
+
+        CLOSE rol_cursor;
+        DEALLOCATE rol_cursor;
+
+        -- Retornar resultado como JSON
+        SELECT @v_roles_json = (
+            SELECT r.id AS idrol, r.nombre
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = @p_email
+            FOR JSON PATH
+        );
+
+        SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        IF CURSOR_STATUS('local', 'rol_cursor') >= 0
+        BEGIN
+            CLOSE rol_cursor;
+            DEALLOCATE rol_cursor;
+        END;
+
+        THROW;
+    END CATCH
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 8. SP ELIMINAR USUARIO CON ROLES
+-- Elimina el usuario (ON DELETE CASCADE borra sus roles)
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "eliminar_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE eliminar_usuario_con_roles
+    @p_email VARCHAR(100),
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @v_msg NVARCHAR(500);
+
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = @p_email)
+    BEGIN
+        SET @v_msg = CONCAT('Usuario ', @p_email, ' no existe');
+        THROW 50006, @v_msg, 1;
+    END
+
+    -- Eliminar roles del usuario primero (FK sin CASCADE)
+    DELETE FROM rol_usuario WHERE fkemail = @p_email;
+    DELETE FROM usuario WHERE email = @p_email;
+
+    SET @p_resultado = '{"mensaje":"Usuario eliminado exitosamente","email_eliminado":"' + @p_email + '"}';
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 9. SP ACTUALIZAR ROLES DE USUARIO
+-- Solo reemplaza los roles sin tocar la contraseña
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "actualizar_roles_usuario",
+--     "p_email": "user@correo.com",
+--     "p_roles_json": "[{\"fkidrol\":1},{\"fkidrol\":2}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE actualizar_roles_usuario
+    @p_email VARCHAR(100),
+    @p_roles_json NVARCHAR(MAX),
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @v_idrol INT;
+    DECLARE @v_roles_json NVARCHAR(MAX);
+    DECLARE @v_msg NVARCHAR(500);
+
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = @p_email)
+    BEGIN
+        SET @v_msg = CONCAT('Usuario ', @p_email, ' no existe');
+        THROW 50007, @v_msg, 1;
+    END
+
+    BEGIN TRY
+        BEGIN TRANSACTION;
+
+        -- Eliminar los roles anteriores
+        DELETE FROM rol_usuario WHERE fkemail = @p_email;
+
+        -- Insertar los nuevos roles
+        DECLARE rol_cursor CURSOR LOCAL FAST_FORWARD FOR
+            SELECT CAST(JSON_VALUE(value, '$.fkidrol') AS INT)
+            FROM OPENJSON(@p_roles_json);
+
+        OPEN rol_cursor;
+        FETCH NEXT FROM rol_cursor INTO @v_idrol;
+
+        WHILE @@FETCH_STATUS = 0
+        BEGIN
+            INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (@p_email, @v_idrol);
+            FETCH NEXT FROM rol_cursor INTO @v_idrol;
+        END
+
+        CLOSE rol_cursor;
+        DEALLOCATE rol_cursor;
+
+        -- Retornar resultado como JSON
+        SELECT @v_roles_json = (
+            SELECT r.id AS idrol, r.nombre
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = @p_email
+            FOR JSON PATH
+        );
+
+        SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        IF CURSOR_STATUS('local', 'rol_cursor') >= 0
+        BEGIN
+            CLOSE rol_cursor;
+            DEALLOCATE rol_cursor;
+        END;
+
+        THROW;
+    END CATCH
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 10. SP CONSULTAR USUARIO CON ROLES
+-- Retorna JSON con email y array de roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "consultar_usuario_con_roles",
+--     "p_email": "admin@correo.com", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE consultar_usuario_con_roles
+    @p_email VARCHAR(100),
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @v_roles_json NVARCHAR(MAX);
+    DECLARE @v_msg NVARCHAR(500);
+
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = @p_email)
+    BEGIN
+        SET @v_msg = CONCAT('Usuario ', @p_email, ' no existe');
+        THROW 50008, @v_msg, 1;
+    END
+
+    SELECT @v_roles_json = (
+        SELECT r.id AS idrol, r.nombre
+        FROM rol_usuario ru
+        JOIN rol r ON r.id = ru.fkidrol
+        WHERE ru.fkemail = @p_email
+        FOR JSON PATH
+    );
+
+    SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 11. SP LISTAR USUARIOS CON ROLES
+-- Retorna JSON array con todos los usuarios y sus roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "listar_usuarios_con_roles", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE listar_usuarios_con_roles
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @v_result NVARCHAR(MAX) = '[';
+    DECLARE @v_email VARCHAR(100);
+    DECLARE @v_roles_json NVARCHAR(MAX);
+    DECLARE @v_first BIT = 1;
+
+    DECLARE usuario_cursor CURSOR LOCAL FAST_FORWARD FOR
+        SELECT email FROM usuario ORDER BY email;
+
+    OPEN usuario_cursor;
+    FETCH NEXT FROM usuario_cursor INTO @v_email;
+
+    WHILE @@FETCH_STATUS = 0
+    BEGIN
+        IF @v_first = 0
+            SET @v_result = @v_result + ',';
+        SET @v_first = 0;
+
+        SELECT @v_roles_json = (
+            SELECT r.id AS idrol, r.nombre
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = @v_email
+            FOR JSON PATH
+        );
+
+        SET @v_result = @v_result + '{"email":"' + @v_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+
+        FETCH NEXT FROM usuario_cursor INTO @v_email;
+    END
+
+    CLOSE usuario_cursor;
+    DEALLOCATE usuario_cursor;
+
+    SET @v_result = @v_result + ']';
+
+    IF @v_first = 1
+        SET @v_result = '[]';
+
+    SET @p_resultado = @v_result;
+END;
+GO
+
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS - PERMISOS (RBAC)
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 12. SP VERIFICAR ACCESO A RUTA
+-- Verifica si un usuario tiene permiso para acceder a una ruta
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "verificar_acceso_ruta",
+--     "p_email": "admin@correo.com", "p_fkidruta": 2,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE verificar_acceso_ruta
+    @p_email VARCHAR(100),
+    @p_fkidruta INT,
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @v_tiene_acceso BIT = 0;
+
+    IF EXISTS (
+        SELECT 1
+        FROM usuario u
+        INNER JOIN rol_usuario ur ON u.email = ur.fkemail
+        INNER JOIN rutarol rr ON ur.fkidrol = rr.fkidrol
+        WHERE u.email = @p_email AND rr.fkidruta = @p_fkidruta
+    )
+        SET @v_tiene_acceso = 1;
+
+    SET @p_resultado = '{"tiene_acceso":' + CAST(@v_tiene_acceso AS NVARCHAR) +
+        ',"email":"' + @p_email + '","fkidruta":' + CAST(@p_fkidruta AS NVARCHAR) + '}';
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 13. SP LISTAR RUTAROL
+-- Lista todos los permisos ruta-rol con nombres
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "listar_rutarol", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE listar_rutarol
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    SELECT @p_resultado = (
+        SELECT rr.fkidruta, rt.ruta, rr.fkidrol, r.nombre AS rol
+        FROM rutarol rr
+        JOIN ruta rt ON rt.id = rr.fkidruta
+        JOIN rol r ON r.id = rr.fkidrol
+        ORDER BY rt.ruta, r.nombre
+        FOR JSON PATH
+    );
+
+    SET @p_resultado = ISNULL(@p_resultado, '[]');
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 14. SP CREAR RUTAROL
+-- Asigna un rol a una ruta por IDs
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "crear_rutarol",
+--     "p_fkidruta": 8, "p_fkidrol": 3,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE crear_rutarol
+    @p_fkidruta INT,
+    @p_fkidrol INT,
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Verificar si la ruta existe
+    IF NOT EXISTS (SELECT 1 FROM ruta WHERE id = @p_fkidruta)
+    BEGIN
+        SET @p_resultado = '{"success":false,"message":"La ruta especificada no existe"}';
+        RETURN;
+    END
+
+    -- Verificar si el rol existe
+    IF NOT EXISTS (SELECT 1 FROM rol WHERE id = @p_fkidrol)
+    BEGIN
+        SET @p_resultado = '{"success":false,"message":"El rol especificado no existe"}';
+        RETURN;
+    END
+
+    -- Verificar si el permiso ya existe
+    IF EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = @p_fkidruta AND fkidrol = @p_fkidrol)
+    BEGIN
+        SET @p_resultado = '{"success":false,"message":"El permiso ya existe"}';
+        RETURN;
+    END
+
+    INSERT INTO rutarol (fkidruta, fkidrol) VALUES (@p_fkidruta, @p_fkidrol);
+    SET @p_resultado = '{"success":true,"message":"Permiso creado exitosamente"}';
+END;
+GO
+
+-- ------------------------------------------------------------
+-- 15. SP ELIMINAR RUTAROL
+-- Quita un permiso ruta-rol por IDs
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "eliminar_rutarol",
+--     "p_fkidruta": 8, "p_fkidrol": 3,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE eliminar_rutarol
+    @p_fkidruta INT,
+    @p_fkidrol INT,
+    @p_resultado NVARCHAR(MAX) OUTPUT
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Verificar si el permiso existe
+    IF NOT EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = @p_fkidruta AND fkidrol = @p_fkidrol)
+    BEGIN
+        SET @p_resultado = '{"success":false,"message":"El permiso no existe"}';
+        RETURN;
+    END
+
+    DELETE FROM rutarol WHERE fkidruta = @p_fkidruta AND fkidrol = @p_fkidrol;
+    SET @p_resultado = '{"success":true,"message":"Permiso eliminado exitosamente"}';
 END;
 GO
 
@@ -874,30 +1379,13 @@ INSERT INTO rol_usuario (fkemail, fkidrol) VALUES
 ('nuevo@correo.com', 3);
 
 -- Rutas por rol
-INSERT INTO rutarol (ruta, rol) VALUES
-('/home', 'Administrador'),
-('/usuarios', 'Administrador'),
-('/facturas', 'Administrador'),
-('/clientes', 'Administrador'),
-('/vendedores', 'Administrador'),
-('/personas', 'Administrador'),
-('/empresas', 'Administrador'),
-('/productos', 'Administrador'),
-('/roles', 'Administrador'),
-('/permisos', 'Administrador'),
-('/permisos/crear', 'Administrador'),
-('/permisos/eliminar', 'Administrador'),
-('/rutas', 'Administrador'),
-('/rutas/crear', 'Administrador'),
-('/rutas/eliminar', 'Administrador'),
-('/home', 'Vendedor'),
-('/facturas', 'Vendedor'),
-('/clientes', 'Vendedor'),
-('/home', 'Cajero'),
-('/facturas', 'Cajero'),
-('/home', 'Contador'),
-('/clientes', 'Contador'),
-('/productos', 'Contador'),
-('/home', 'Cliente'),
-('/productos', 'Cliente');
+-- Rutas por rol (fkidruta, fkidrol)
+-- Rutas: 1=/home,2=/usuarios,3=/facturas,4=/clientes,5=/vendedores,6=/personas,7=/empresas,8=/productos,9=/roles,10=/permisos,11=/permisos/crear,12=/permisos/eliminar,13=/rutas,14=/rutas/crear,15=/rutas/eliminar
+-- Roles: 1=Administrador,2=Vendedor,3=Cajero,4=Contador,5=Cliente
+INSERT INTO rutarol (fkidruta, fkidrol) VALUES
+(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1),
+(1, 2), (3, 2), (4, 2),
+(1, 3), (3, 3),
+(1, 4), (4, 4), (8, 4),
+(1, 5), (8, 5);
 GO

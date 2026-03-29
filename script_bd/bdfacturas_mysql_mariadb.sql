@@ -7,11 +7,11 @@
 -- ================================================================
 -- CREAR Y SELECCIONAR BASE DE DATOS
 -- ================================================================
-CREATE DATABASE IF NOT EXISTS bdfacturas
+CREATE DATABASE IF NOT EXISTS bdfacturas_mariadb_local
     DEFAULT CHARACTER SET utf8mb4
     COLLATE utf8mb4_unicode_ci;
 
-USE bdfacturas;
+USE bdfacturas_mariadb_local;
 
 -- ================================================================
 -- ELIMINAR OBJETOS EXISTENTES (para poder re-ejecutar el script)
@@ -72,7 +72,8 @@ CREATE TABLE rol (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE ruta (
-    ruta VARCHAR(100) PRIMARY KEY,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ruta VARCHAR(100) NOT NULL UNIQUE,
     descripcion VARCHAR(255) NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -102,11 +103,11 @@ CREATE TABLE rol_usuario (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE rutarol (
-    ruta VARCHAR(100) NOT NULL,
-    rol VARCHAR(100) NOT NULL,
-    PRIMARY KEY (ruta, rol),
-    FOREIGN KEY (ruta) REFERENCES ruta (ruta) ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (rol) REFERENCES rol (nombre) ON UPDATE CASCADE ON DELETE CASCADE
+    fkidruta INT NOT NULL,
+    fkidrol INT NOT NULL,
+    PRIMARY KEY (fkidruta, fkidrol),
+    FOREIGN KEY (fkidruta) REFERENCES ruta (id) ON DELETE CASCADE,
+    FOREIGN KEY (fkidrol) REFERENCES rol (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE producto (
@@ -232,7 +233,8 @@ CREATE PROCEDURE crear_factura_con_detalle(
     IN p_fkidcliente INT,
     IN p_fkidvendedor INT,
     IN p_fecha TIMESTAMP,
-    IN p_detalles JSON
+    IN p_detalles JSON,
+    IN p_minimo_detalle INT
 )
 BEGIN
     DECLARE v_numfactura INT;
@@ -240,6 +242,17 @@ BEGIN
     DECLARE v_count INT;
     DECLARE v_codproducto VARCHAR(30);
     DECLARE v_cantidad INT;
+    DECLARE v_minimo INT;
+
+    -- COALESCE(NULLIF(p_minimo_detalle, 0), 1): la API envia 0 cuando no se pasa el parametro
+    SET v_minimo = COALESCE(NULLIF(p_minimo_detalle, 0), 1);
+
+    -- Validar minimo de productos
+    IF p_detalles IS NULL OR JSON_LENGTH(p_detalles) < v_minimo THEN
+        SET @v_msg = CONCAT('La factura requiere minimo ', v_minimo, ' producto(s).');
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = @v_msg;
+    END IF;
 
     -- Insertar la factura
     INSERT INTO factura (fkidcliente, fkidvendedor, fecha)
@@ -269,13 +282,25 @@ CREATE PROCEDURE actualizar_factura_con_detalle(
     IN p_fkidcliente INT,
     IN p_fkidvendedor INT,
     IN p_fecha TIMESTAMP,
-    IN p_detalles JSON
+    IN p_detalles JSON,
+    IN p_minimo_detalle INT
 )
 BEGIN
     DECLARE v_index INT DEFAULT 0;
     DECLARE v_count INT;
     DECLARE v_codproducto VARCHAR(30);
     DECLARE v_cantidad INT;
+    DECLARE v_minimo INT;
+
+    -- COALESCE(NULLIF(p_minimo_detalle, 0), 1): la API envia 0 cuando no se pasa el parametro
+    SET v_minimo = COALESCE(NULLIF(p_minimo_detalle, 0), 1);
+
+    -- Validar minimo de productos
+    IF p_detalles IS NULL OR JSON_LENGTH(p_detalles) < v_minimo THEN
+        SET @v_msg = CONCAT('La factura requiere minimo ', v_minimo, ' producto(s).');
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = @v_msg;
+    END IF;
 
     -- Actualizar la cabecera de la factura
     UPDATE factura
@@ -513,7 +538,7 @@ END$$
 -- ================================================================
 CREATE PROCEDURE verificar_acceso_ruta(
     IN p_email VARCHAR(100),
-    IN p_ruta VARCHAR(100),
+    IN p_fkidruta INT,
     OUT p_resultado JSON
 )
 BEGIN
@@ -524,68 +549,77 @@ BEGIN
         SELECT 1
         FROM usuario u
         INNER JOIN rol_usuario ur ON u.email = ur.fkemail
-        INNER JOIN rol r ON ur.fkidrol = r.id
-        INNER JOIN rutarol rr ON r.nombre = rr.rol
-        WHERE u.email = p_email AND rr.ruta = p_ruta
+        INNER JOIN rutarol rr ON ur.fkidrol = rr.fkidrol
+        WHERE u.email = p_email AND rr.fkidruta = p_fkidruta
     ) INTO v_tiene_acceso;
 
     -- Construir el resultado JSON
     SET p_resultado = JSON_OBJECT(
         'tiene_acceso', v_tiene_acceso,
         'email', p_email,
-        'ruta', p_ruta
+        'fkidruta', p_fkidruta
     );
 END$$
 
 CREATE PROCEDURE listar_rutarol()
 BEGIN
-    SELECT rr.ruta, rr.rol
+    SELECT rr.fkidruta, rt.ruta, rr.fkidrol, r.nombre AS rol
     FROM rutarol rr
-    ORDER BY rr.ruta, rr.rol;
+    JOIN ruta rt ON rt.id = rr.fkidruta
+    JOIN rol r ON r.id = rr.fkidrol
+    ORDER BY rt.ruta, r.nombre;
 END$$
 
 CREATE PROCEDURE crear_rutarol(
-    IN p_ruta VARCHAR(100),
-    IN p_rol VARCHAR(100),
+    IN p_fkidruta INT,
+    IN p_fkidrol INT,
     OUT p_resultado JSON
 )
 BEGIN
+    DECLARE v_existe_ruta INT;
     DECLARE v_existe_rol INT;
     DECLARE v_existe_permiso INT;
 
-    -- Verificar si el rol existe
-    SELECT COUNT(*) INTO v_existe_rol FROM rol WHERE nombre = p_rol;
+    -- Verificar si la ruta existe
+    SELECT COUNT(*) INTO v_existe_ruta FROM ruta WHERE id = p_fkidruta;
 
-    IF v_existe_rol = 0 THEN
-        SET p_resultado = JSON_OBJECT('success', false, 'message', 'El rol especificado no existe');
+    IF v_existe_ruta = 0 THEN
+        SET p_resultado = JSON_OBJECT('success', false, 'message', 'La ruta especificada no existe');
     ELSE
-        -- Verificar si el permiso ya existe
-        SELECT COUNT(*) INTO v_existe_permiso FROM rutarol WHERE ruta = p_ruta AND rol = p_rol;
+        -- Verificar si el rol existe
+        SELECT COUNT(*) INTO v_existe_rol FROM rol WHERE id = p_fkidrol;
 
-        IF v_existe_permiso > 0 THEN
-            SET p_resultado = JSON_OBJECT('success', false, 'message', 'El permiso ya existe');
+        IF v_existe_rol = 0 THEN
+            SET p_resultado = JSON_OBJECT('success', false, 'message', 'El rol especificado no existe');
         ELSE
-            INSERT INTO rutarol (ruta, rol) VALUES (p_ruta, p_rol);
-            SET p_resultado = JSON_OBJECT('success', true, 'message', 'Permiso creado exitosamente');
+            -- Verificar si el permiso ya existe
+            SELECT COUNT(*) INTO v_existe_permiso FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
+
+            IF v_existe_permiso > 0 THEN
+                SET p_resultado = JSON_OBJECT('success', false, 'message', 'El permiso ya existe');
+            ELSE
+                INSERT INTO rutarol (fkidruta, fkidrol) VALUES (p_fkidruta, p_fkidrol);
+                SET p_resultado = JSON_OBJECT('success', true, 'message', 'Permiso creado exitosamente');
+            END IF;
         END IF;
     END IF;
 END$$
 
 CREATE PROCEDURE eliminar_rutarol(
-    IN p_ruta VARCHAR(100),
-    IN p_rol VARCHAR(100),
+    IN p_fkidruta INT,
+    IN p_fkidrol INT,
     OUT p_resultado JSON
 )
 BEGIN
     DECLARE v_existe_permiso INT;
 
     -- Verificar si el permiso existe
-    SELECT COUNT(*) INTO v_existe_permiso FROM rutarol WHERE ruta = p_ruta AND rol = p_rol;
+    SELECT COUNT(*) INTO v_existe_permiso FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
 
     IF v_existe_permiso = 0 THEN
         SET p_resultado = JSON_OBJECT('success', false, 'message', 'El permiso no existe');
     ELSE
-        DELETE FROM rutarol WHERE ruta = p_ruta AND rol = p_rol;
+        DELETE FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
         SET p_resultado = JSON_OBJECT('success', true, 'message', 'Permiso eliminado exitosamente');
     END IF;
 END$$
@@ -641,9 +675,9 @@ CALL crear_usuario_con_roles('jefe@correo.com', 'jefe123', '[{"fkidrol":1},{"fki
 CALL crear_usuario_con_roles('cliente1@correo.com', 'cli123', '[{"fkidrol":5}]');
 
 -- Facturas
-CALL crear_factura_con_detalle(1, 1, '2025-10-15 00:00:00', '[{"fkcodproducto":"PR001","cantidad":1},{"fkcodproducto":"PR004","cantidad":2}]');
-CALL crear_factura_con_detalle(2, 2, '2025-10-16 00:00:00', '[{"fkcodproducto":"PR002","cantidad":2},{"fkcodproducto":"PR005","cantidad":1}]');
-CALL crear_factura_con_detalle(3, 3, '2025-10-17 00:00:00', '[{"fkcodproducto":"PR003","cantidad":3},{"fkcodproducto":"PR007","cantidad":1}]');
+CALL crear_factura_con_detalle(1, 1, '2025-10-15 00:00:00', '[{"fkcodproducto":"PR001","cantidad":1},{"fkcodproducto":"PR004","cantidad":2}]', 1);
+CALL crear_factura_con_detalle(2, 2, '2025-10-16 00:00:00', '[{"fkcodproducto":"PR002","cantidad":2},{"fkcodproducto":"PR005","cantidad":1}]', 1);
+CALL crear_factura_con_detalle(3, 3, '2025-10-17 00:00:00', '[{"fkcodproducto":"PR003","cantidad":3},{"fkcodproducto":"PR007","cantidad":1}]', 1);
 
 -- Rutas del sistema
 INSERT INTO ruta (ruta, descripcion) VALUES
@@ -663,45 +697,15 @@ INSERT INTO ruta (ruta, descripcion) VALUES
 ('/rutas/crear', 'Crear ruta (POST)'),
 ('/rutas/eliminar', 'Eliminar ruta (POST)');
 
--- Permisos: Administrador
-INSERT INTO rutarol (ruta, rol) VALUES
-('/home', 'Administrador'),
-('/usuarios', 'Administrador'),
-('/facturas', 'Administrador'),
-('/clientes', 'Administrador'),
-('/vendedores', 'Administrador'),
-('/personas', 'Administrador'),
-('/empresas', 'Administrador'),
-('/productos', 'Administrador'),
-('/roles', 'Administrador'),
-('/permisos', 'Administrador'),
-('/permisos/crear', 'Administrador'),
-('/permisos/eliminar', 'Administrador'),
-('/rutas', 'Administrador'),
-('/rutas/crear', 'Administrador'),
-('/rutas/eliminar', 'Administrador');
-
--- Permisos: Vendedor
-INSERT INTO rutarol (ruta, rol) VALUES
-('/home', 'Vendedor'),
-('/facturas', 'Vendedor'),
-('/clientes', 'Vendedor');
-
--- Permisos: Cajero
-INSERT INTO rutarol (ruta, rol) VALUES
-('/home', 'Cajero'),
-('/facturas', 'Cajero');
-
--- Permisos: Contador
-INSERT INTO rutarol (ruta, rol) VALUES
-('/home', 'Contador'),
-('/clientes', 'Contador'),
-('/productos', 'Contador');
-
--- Permisos: Cliente
-INSERT INTO rutarol (ruta, rol) VALUES
-('/home', 'Cliente'),
-('/productos', 'Cliente');
+-- Rutas por rol (fkidruta, fkidrol)
+-- Rutas: 1=/home,2=/usuarios,3=/facturas,4=/clientes,5=/vendedores,6=/personas,7=/empresas,8=/productos,9=/roles,10=/permisos,11=/permisos/crear,12=/permisos/eliminar,13=/rutas,14=/rutas/crear,15=/rutas/eliminar
+-- Roles: 1=Administrador,2=Vendedor,3=Cajero,4=Contador,5=Cliente
+INSERT INTO rutarol (fkidruta, fkidrol) VALUES
+(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1),
+(1, 2), (3, 2), (4, 2),
+(1, 3), (3, 3),
+(1, 4), (4, 4), (8, 4),
+(1, 5), (8, 5);
 
 -- ================================================================
 -- VERIFICACIÓN Y CONSULTAS DE EJEMPLO

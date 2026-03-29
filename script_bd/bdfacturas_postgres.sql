@@ -40,9 +40,11 @@ CREATE TABLE rol (
 );
 
 CREATE TABLE ruta (
+    id SERIAL NOT NULL,
     ruta VARCHAR(100) NOT NULL,
     descripcion VARCHAR(200) NOT NULL,
-    CONSTRAINT pk_ruta PRIMARY KEY (ruta)
+    CONSTRAINT pk_ruta PRIMARY KEY (id),
+    CONSTRAINT uq_ruta UNIQUE (ruta)
 );
 
 CREATE TABLE usuario (
@@ -104,9 +106,11 @@ CREATE TABLE rol_usuario (
 );
 
 CREATE TABLE rutarol (
-    ruta VARCHAR(100) NOT NULL,
-    rol VARCHAR(50) NOT NULL,
-    CONSTRAINT pk_rutarol PRIMARY KEY (ruta, rol)
+    fkidruta INT NOT NULL,
+    fkidrol INT NOT NULL,
+    CONSTRAINT pk_rutarol PRIMARY KEY (fkidruta, fkidrol),
+    CONSTRAINT fk_rutarol_ruta FOREIGN KEY (fkidruta) REFERENCES ruta(id) ON DELETE CASCADE,
+    CONSTRAINT fk_rutarol_rol FOREIGN KEY (fkidrol) REFERENCES rol(id) ON DELETE CASCADE
 );
 
 -- ============================================================
@@ -238,32 +242,15 @@ INSERT INTO rol_usuario (fkemail, fkidrol) VALUES
 ('nuevo@correo.com', 3);
 
 -- Rutas por rol
-INSERT INTO rutarol (ruta, rol) VALUES
-('/home', 'Administrador'),
-('/usuarios', 'Administrador'),
-('/facturas', 'Administrador'),
-('/clientes', 'Administrador'),
-('/vendedores', 'Administrador'),
-('/personas', 'Administrador'),
-('/empresas', 'Administrador'),
-('/productos', 'Administrador'),
-('/roles', 'Administrador'),
-('/permisos', 'Administrador'),
-('/permisos/crear', 'Administrador'),
-('/permisos/eliminar', 'Administrador'),
-('/rutas', 'Administrador'),
-('/rutas/crear', 'Administrador'),
-('/rutas/eliminar', 'Administrador'),
-('/home', 'Vendedor'),
-('/facturas', 'Vendedor'),
-('/clientes', 'Vendedor'),
-('/home', 'Cajero'),
-('/facturas', 'Cajero'),
-('/home', 'Contador'),
-('/clientes', 'Contador'),
-('/productos', 'Contador'),
-('/home', 'Cliente'),
-('/productos', 'Cliente');
+-- Rutas por rol (fkidruta, fkidrol)
+-- Rutas: 1=/home,2=/usuarios,3=/facturas,4=/clientes,5=/vendedores,6=/personas,7=/empresas,8=/productos,9=/roles,10=/permisos,11=/permisos/crear,12=/permisos/eliminar,13=/rutas,14=/rutas/crear,15=/rutas/eliminar
+-- Roles: 1=Administrador,2=Vendedor,3=Cajero,4=Contador,5=Cliente
+INSERT INTO rutarol (fkidruta, fkidrol) VALUES
+(1, 1), (2, 1), (3, 1), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1), (14, 1), (15, 1),
+(1, 2), (3, 2), (4, 2),
+(1, 3), (3, 3),
+(1, 4), (4, 4), (8, 4),
+(1, 5), (8, 5);
 
 -- ============================================================
 -- TRIGGER: Actualizar totales de factura y stock de producto
@@ -612,5 +599,382 @@ BEGIN
         'total_eliminado', v_total,
         'productos_eliminados', v_cantidad_productos
     );
+END;
+$$;
+
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS - USUARIOS CON ROLES
+-- Nota: El cifrado lo hace la API C# con el parámetro camposEncriptar
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 6. SP CREAR USUARIO CON ROLES
+-- Recibe: email, contraseña y JSON array de roles [{"fkidrol":1},...]
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "crear_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_contrasena": "pass123",
+--     "p_roles_json": "[{\"fkidrol\":1},{\"fkidrol\":2}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE crear_usuario_con_roles(
+    IN p_email VARCHAR(100),
+    IN p_contrasena VARCHAR(200),
+    IN p_roles_json JSON,
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_item JSON;
+    v_idrol INT;
+BEGIN
+    -- Insertar el usuario
+    INSERT INTO usuario (email, contrasena)
+    VALUES (p_email, p_contrasena);
+
+    -- Insertar los roles del usuario
+    FOR v_item IN SELECT * FROM json_array_elements(p_roles_json)
+    LOOP
+        v_idrol := (v_item->>'fkidrol')::INTEGER;
+        INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (p_email, v_idrol);
+    END LOOP;
+
+    -- Retornar resultado
+    SELECT json_build_object(
+        'email', p_email,
+        'roles', (
+            SELECT json_agg(json_build_object('idrol', r.id, 'nombre', r.nombre))
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = p_email
+        )
+    ) INTO p_resultado;
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 7. SP ACTUALIZAR USUARIO CON ROLES
+-- Actualiza contraseña (si no está vacía) y reemplaza roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "actualizar_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_contrasena": "newpass",
+--     "p_roles": "[{\"fkidrol\":1},{\"fkidrol\":3}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE actualizar_usuario_con_roles(
+    IN p_email VARCHAR(100),
+    IN p_contrasena VARCHAR(200),
+    IN p_roles JSON,
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_item JSON;
+    v_idrol INT;
+BEGIN
+    -- Actualizar la contraseña solo si no está vacía
+    IF p_contrasena IS NOT NULL AND p_contrasena != '' THEN
+        UPDATE usuario SET contrasena = p_contrasena WHERE email = p_email;
+    END IF;
+
+    -- Eliminar los roles anteriores
+    DELETE FROM rol_usuario WHERE fkemail = p_email;
+
+    -- Insertar los nuevos roles
+    FOR v_item IN SELECT * FROM json_array_elements(p_roles)
+    LOOP
+        v_idrol := (v_item->>'fkidrol')::INTEGER;
+        INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (p_email, v_idrol);
+    END LOOP;
+
+    -- Retornar resultado
+    SELECT json_build_object(
+        'email', p_email,
+        'roles', (
+            SELECT json_agg(json_build_object('idrol', r.id, 'nombre', r.nombre))
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = p_email
+        )
+    ) INTO p_resultado;
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 8. SP ELIMINAR USUARIO CON ROLES
+-- Elimina el usuario (ON DELETE CASCADE borra sus roles)
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "eliminar_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE eliminar_usuario_con_roles(
+    IN p_email VARCHAR(100),
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = p_email) THEN
+        RAISE EXCEPTION 'Usuario % no existe', p_email;
+    END IF;
+
+    -- Eliminar roles del usuario primero (FK sin CASCADE)
+    DELETE FROM rol_usuario WHERE fkemail = p_email;
+    DELETE FROM usuario WHERE email = p_email;
+
+    p_resultado := json_build_object(
+        'mensaje', 'Usuario eliminado exitosamente',
+        'email_eliminado', p_email
+    );
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 9. SP ACTUALIZAR ROLES DE USUARIO
+-- Solo reemplaza los roles sin tocar la contraseña
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "actualizar_roles_usuario",
+--     "p_email": "user@correo.com",
+--     "p_roles_json": "[{\"fkidrol\":1},{\"fkidrol\":2}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE actualizar_roles_usuario(
+    IN p_email VARCHAR(100),
+    IN p_roles_json JSON,
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_item JSON;
+    v_idrol INT;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = p_email) THEN
+        RAISE EXCEPTION 'Usuario % no existe', p_email;
+    END IF;
+
+    -- Eliminar los roles anteriores
+    DELETE FROM rol_usuario WHERE fkemail = p_email;
+
+    -- Insertar los nuevos roles
+    FOR v_item IN SELECT * FROM json_array_elements(p_roles_json)
+    LOOP
+        v_idrol := (v_item->>'fkidrol')::INTEGER;
+        INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (p_email, v_idrol);
+    END LOOP;
+
+    -- Retornar resultado
+    SELECT json_build_object(
+        'email', p_email,
+        'roles', (
+            SELECT json_agg(json_build_object('idrol', r.id, 'nombre', r.nombre))
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = p_email
+        )
+    ) INTO p_resultado;
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 10. SP CONSULTAR USUARIO CON ROLES
+-- Retorna JSON con email y array de roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "consultar_usuario_con_roles",
+--     "p_email": "admin@correo.com", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE consultar_usuario_con_roles(
+    IN p_email VARCHAR(100),
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = p_email) THEN
+        RAISE EXCEPTION 'Usuario % no existe', p_email;
+    END IF;
+
+    SELECT json_build_object(
+        'email', u.email,
+        'roles', COALESCE((
+            SELECT json_agg(json_build_object('idrol', r.id, 'nombre', r.nombre))
+            FROM rol_usuario ru
+            JOIN rol r ON r.id = ru.fkidrol
+            WHERE ru.fkemail = u.email
+        ), '[]'::json)
+    ) INTO p_resultado
+    FROM usuario u
+    WHERE u.email = p_email;
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 11. SP LISTAR USUARIOS CON ROLES
+-- Retorna JSON array con todos los usuarios y sus roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "listar_usuarios_con_roles", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE listar_usuarios_con_roles(
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    SELECT COALESCE(json_agg(sub), '[]'::json) INTO p_resultado
+    FROM (
+        SELECT json_build_object(
+            'email', u.email,
+            'roles', COALESCE((
+                SELECT json_agg(json_build_object('idrol', r.id, 'nombre', r.nombre))
+                FROM rol_usuario ru
+                JOIN rol r ON r.id = ru.fkidrol
+                WHERE ru.fkemail = u.email
+            ), '[]'::json)
+        ) AS sub
+        FROM usuario u
+        ORDER BY u.email
+    ) t(sub);
+END;
+$$;
+
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS - PERMISOS (RBAC)
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 12. SP VERIFICAR ACCESO A RUTA
+-- Verifica si un usuario tiene permiso para acceder a una ruta
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "verificar_acceso_ruta",
+--     "p_email": "admin@correo.com", "p_fkidruta": 2,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE verificar_acceso_ruta(
+    IN p_email VARCHAR(100),
+    IN p_fkidruta INT,
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_tiene_acceso BOOLEAN;
+BEGIN
+    SELECT EXISTS(
+        SELECT 1
+        FROM usuario u
+        INNER JOIN rol_usuario ur ON u.email = ur.fkemail
+        INNER JOIN rutarol rr ON ur.fkidrol = rr.fkidrol
+        WHERE u.email = p_email AND rr.fkidruta = p_fkidruta
+    ) INTO v_tiene_acceso;
+
+    p_resultado := json_build_object(
+        'tiene_acceso', v_tiene_acceso,
+        'email', p_email,
+        'fkidruta', p_fkidruta
+    );
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 13. SP LISTAR RUTAROL
+-- Lista todos los permisos ruta-rol con nombres
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "listar_rutarol", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE listar_rutarol(
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    SELECT COALESCE(json_agg(
+        json_build_object(
+            'fkidruta', rr.fkidruta,
+            'ruta', rt.ruta,
+            'fkidrol', rr.fkidrol,
+            'rol', r.nombre
+        )
+        ORDER BY rt.ruta, r.nombre
+    ), '[]'::json) INTO p_resultado
+    FROM rutarol rr
+    JOIN ruta rt ON rt.id = rr.fkidruta
+    JOIN rol r ON r.id = rr.fkidrol;
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 14. SP CREAR RUTAROL
+-- Asigna un rol a una ruta por IDs
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "crear_rutarol",
+--     "p_fkidruta": 8, "p_fkidrol": 3,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE crear_rutarol(
+    IN p_fkidruta INT,
+    IN p_fkidrol INT,
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Verificar si la ruta existe
+    IF NOT EXISTS (SELECT 1 FROM ruta WHERE id = p_fkidruta) THEN
+        p_resultado := json_build_object('success', false, 'message', 'La ruta especificada no existe');
+        RETURN;
+    END IF;
+
+    -- Verificar si el rol existe
+    IF NOT EXISTS (SELECT 1 FROM rol WHERE id = p_fkidrol) THEN
+        p_resultado := json_build_object('success', false, 'message', 'El rol especificado no existe');
+        RETURN;
+    END IF;
+
+    -- Verificar si el permiso ya existe
+    IF EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol) THEN
+        p_resultado := json_build_object('success', false, 'message', 'El permiso ya existe');
+        RETURN;
+    END IF;
+
+    INSERT INTO rutarol (fkidruta, fkidrol) VALUES (p_fkidruta, p_fkidrol);
+    p_resultado := json_build_object('success', true, 'message', 'Permiso creado exitosamente');
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 15. SP ELIMINAR RUTAROL
+-- Quita un permiso ruta-rol por IDs
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "eliminar_rutarol",
+--     "p_fkidruta": 8, "p_fkidrol": 3,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE eliminar_rutarol(
+    IN p_fkidruta INT,
+    IN p_fkidrol INT,
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    -- Verificar si el permiso existe
+    IF NOT EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol) THEN
+        p_resultado := json_build_object('success', false, 'message', 'El permiso no existe');
+        RETURN;
+    END IF;
+
+    DELETE FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
+    p_resultado := json_build_object('success', true, 'message', 'Permiso eliminado exitosamente');
 END;
 $$;
