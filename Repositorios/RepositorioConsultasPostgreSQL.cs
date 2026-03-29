@@ -267,8 +267,16 @@ private async Task<List<(string Nombre, string Modo, string Tipo)>> ObtenerMetad
 
                 if (esJSON)
                 {
-                    string valorJson = valor == DBNull.Value ? "{}" : valor?.ToString() ?? "{}";
-                    comando.Parameters.Add(new NpgsqlParameter { Value = valorJson, NpgsqlDbType = tipoMeta == "jsonb" ? NpgsqlDbType.Jsonb : NpgsqlDbType.Json });
+                    string? valorStr = valor == DBNull.Value ? null : valor?.ToString();
+                    // Si es vacío o null y es INOUT (parámetro de salida), enviar DBNull para que el SP lo llene
+                    if (string.IsNullOrWhiteSpace(valorStr))
+                    {
+                        comando.Parameters.Add(new NpgsqlParameter { Value = DBNull.Value, NpgsqlDbType = tipoMeta == "jsonb" ? NpgsqlDbType.Jsonb : NpgsqlDbType.Json });
+                    }
+                    else
+                    {
+                        comando.Parameters.Add(new NpgsqlParameter { Value = valorStr, NpgsqlDbType = tipoMeta == "jsonb" ? NpgsqlDbType.Jsonb : NpgsqlDbType.Json });
+                    }
                 }
                 // Integer
                 else if (tipoMeta is "integer" or "int" or "int4")
