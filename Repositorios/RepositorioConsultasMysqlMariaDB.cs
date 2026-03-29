@@ -130,18 +130,77 @@ namespace ApiGenericaCsharp.Repositorios
 
             var cadena = _proveedorConexion.ObtenerCadenaConexion();
             var tabla = new DataTable();
-            var placeholders = ConstruirPlaceholders(parametros);
 
             await using var conexion = new MySqlConnection(cadena);
             await conexion.OpenAsync();
 
-            // MySQL: CALL nombreSP(@a, @b, ...)
-            string sqlCall = $"CALL {nombreSP}({placeholders})";
-            await using var cmdCall = new MySqlCommand(sqlCall, conexion);
-            AgregarParametros(cmdCall, parametros);
+            // Consultar metadatos para detectar parámetros OUT/INOUT
+            var parametrosOut = new List<string>();
+            var db = DatabaseActual(conexion);
+            var sqlMeta = @"SELECT PARAMETER_NAME, PARAMETER_MODE
+                            FROM INFORMATION_SCHEMA.PARAMETERS
+                            WHERE SPECIFIC_SCHEMA = @db AND SPECIFIC_NAME = @sp
+                            ORDER BY ORDINAL_POSITION";
+            await using (var cmdMeta = new MySqlCommand(sqlMeta, conexion))
+            {
+                cmdMeta.Parameters.AddWithValue("@db", db);
+                cmdMeta.Parameters.AddWithValue("@sp", nombreSP);
+                await using var reader = await cmdMeta.ExecuteReaderAsync();
+                while (await reader.ReadAsync())
+                {
+                    var modo = reader.IsDBNull(1) ? "IN" : reader.GetString(1);
+                    if (modo == "OUT" || modo == "INOUT")
+                        parametrosOut.Add(reader.IsDBNull(0) ? "" : reader.GetString(0));
+                }
+            }
 
-            await using var lectorCall = await cmdCall.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
-            tabla.Load(lectorCall);
+            if (parametrosOut.Count > 0 && parametros != null)
+            {
+                // Estrategia para OUT/INOUT: usar variables de sesión MySQL
+                // 1. SET @param = valor para cada parámetro
+                // 2. CALL sp(@param1, @param2, ...)
+                // 3. SELECT variables OUT
+
+                // SET session variables
+                foreach (var p in parametros)
+                {
+                    string nombre = p.ParameterName?.StartsWith("@") == true ? p.ParameterName : $"@{p.ParameterName}";
+                    var valor = p.Value == null || p.Value == DBNull.Value ? "NULL" : $"'{p.Value.ToString()!.Replace("'", "''")}'";
+                    var sqlSet = $"SET {nombre} = {valor}";
+                    await using var cmdSet = new MySqlCommand(sqlSet, conexion);
+                    await cmdSet.ExecuteNonQueryAsync();
+                }
+
+                // CALL with session variable names (no bound parameters)
+                var nombres = parametros.Select(p =>
+                    p.ParameterName?.StartsWith("@") == true ? p.ParameterName : $"@{p.ParameterName}").ToList();
+                var placeholdersCall = string.Join(", ", nombres);
+                string sqlCall = $"CALL {nombreSP}({placeholdersCall})";
+                await using (var cmdCall = new MySqlCommand(sqlCall, conexion))
+                {
+                    // No agregar parámetros bound - usamos variables de sesión
+                    await cmdCall.ExecuteNonQueryAsync();
+                }
+
+                // SELECT OUT variables
+                var selectVars = string.Join(", ", parametrosOut.Select(n =>
+                    $"@{n} AS `@{n}`"));
+                string sqlSelect = $"SELECT {selectVars}";
+                await using var cmdSelect = new MySqlCommand(sqlSelect, conexion);
+                await using var lectorSelect = await cmdSelect.ExecuteReaderAsync();
+                tabla.Load(lectorSelect);
+            }
+            else
+            {
+                // Sin OUT params: comportamiento original
+                var placeholders = ConstruirPlaceholders(parametros);
+                string sqlCall = $"CALL {nombreSP}({placeholders})";
+                await using var cmdCall = new MySqlCommand(sqlCall, conexion);
+                AgregarParametros(cmdCall, parametros);
+
+                await using var lectorCall = await cmdCall.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
+                tabla.Load(lectorCall);
+            }
 
             return tabla;
         }
