@@ -55,22 +55,22 @@ GO
 -- ============================================================
 
 CREATE TABLE empresa (
-    codigo VARCHAR(10) NOT NULL,
-    nombre VARCHAR(100) NOT NULL,
+    codigo NVARCHAR(10) NOT NULL,
+    nombre NVARCHAR(100) NOT NULL,
     CONSTRAINT pk_empresa PRIMARY KEY (codigo)
 );
 
 CREATE TABLE persona (
-    codigo VARCHAR(10) NOT NULL,
-    nombre VARCHAR(100) NOT NULL,
-    email VARCHAR(100) NOT NULL,
-    telefono VARCHAR(20) NOT NULL,
+    codigo NVARCHAR(10) NOT NULL,
+    nombre NVARCHAR(100) NOT NULL,
+    email NVARCHAR(100) NOT NULL,
+    telefono NVARCHAR(20) NOT NULL,
     CONSTRAINT pk_persona PRIMARY KEY (codigo)
 );
 
 CREATE TABLE producto (
-    codigo VARCHAR(10) NOT NULL,
-    nombre VARCHAR(100) NOT NULL,
+    codigo NVARCHAR(10) NOT NULL,
+    nombre NVARCHAR(100) NOT NULL,
     stock INT NOT NULL,
     valorunitario DECIMAL(18,2) NOT NULL,
     CONSTRAINT pk_producto PRIMARY KEY (codigo)
@@ -78,21 +78,21 @@ CREATE TABLE producto (
 
 CREATE TABLE rol (
     id INT IDENTITY(1,1) NOT NULL,
-    nombre VARCHAR(50) NOT NULL,
+    nombre NVARCHAR(50) NOT NULL,
     CONSTRAINT pk_rol PRIMARY KEY (id)
 );
 
 CREATE TABLE ruta (
     id INT IDENTITY(1,1) NOT NULL,
-    ruta VARCHAR(100) NOT NULL,
-    descripcion VARCHAR(200) NOT NULL,
+    ruta NVARCHAR(100) NOT NULL,
+    descripcion NVARCHAR(200) NOT NULL,
     CONSTRAINT pk_ruta PRIMARY KEY (id),
     CONSTRAINT uq_ruta UNIQUE (ruta)
 );
 
 CREATE TABLE usuario (
-    email VARCHAR(100) NOT NULL,
-    contrasena VARCHAR(200) NOT NULL,
+    email NVARCHAR(100) NOT NULL,
+    contrasena NVARCHAR(200) NOT NULL,
     CONSTRAINT pk_usuario PRIMARY KEY (email)
 );
 GO
@@ -104,8 +104,8 @@ GO
 CREATE TABLE cliente (
     id INT IDENTITY(1,1) NOT NULL,
     credito DECIMAL(18,2) NOT NULL DEFAULT 0,
-    fkcodpersona VARCHAR(10) NOT NULL,
-    fkcodempresa VARCHAR(10),
+    fkcodpersona NVARCHAR(10) NOT NULL,
+    fkcodempresa NVARCHAR(10),
     CONSTRAINT pk_cliente PRIMARY KEY (id),
     CONSTRAINT fk_cliente_persona FOREIGN KEY (fkcodpersona) REFERENCES persona(codigo),
     CONSTRAINT fk_cliente_empresa FOREIGN KEY (fkcodempresa) REFERENCES empresa(codigo)
@@ -114,8 +114,8 @@ CREATE TABLE cliente (
 CREATE TABLE vendedor (
     id INT IDENTITY(1,1) NOT NULL,
     carnet INT NOT NULL,
-    direccion VARCHAR(100) NOT NULL,
-    fkcodpersona VARCHAR(10) NOT NULL,
+    direccion NVARCHAR(100) NOT NULL,
+    fkcodpersona NVARCHAR(10) NOT NULL,
     CONSTRAINT pk_vendedor PRIMARY KEY (id),
     CONSTRAINT fk_vendedor_persona FOREIGN KEY (fkcodpersona) REFERENCES persona(codigo)
 );
@@ -133,7 +133,7 @@ CREATE TABLE factura (
 
 CREATE TABLE productosporfactura (
     fknumfactura INT NOT NULL,
-    fkcodproducto VARCHAR(10) NOT NULL,
+    fkcodproducto NVARCHAR(10) NOT NULL,
     cantidad INT NOT NULL,
     subtotal DECIMAL(18,2) NOT NULL DEFAULT 0,
     CONSTRAINT pk_productosporfactura PRIMARY KEY (fknumfactura, fkcodproducto),
@@ -142,7 +142,7 @@ CREATE TABLE productosporfactura (
 );
 
 CREATE TABLE rol_usuario (
-    fkemail VARCHAR(100) NOT NULL,
+    fkemail NVARCHAR(100) NOT NULL,
     fkidrol INT NOT NULL,
     CONSTRAINT pk_rol_usuario PRIMARY KEY (fkemail, fkidrol),
     CONSTRAINT fk_rolusuario_usuario FOREIGN KEY (fkemail) REFERENCES usuario(email),
@@ -180,15 +180,15 @@ BEGIN
         WHERE p.stock < i.cantidad
     )
     BEGIN
-        DECLARE @v_codigo_err VARCHAR(10), @v_stock_err INT, @v_cantidad_err INT;
+        DECLARE @v_codigo_err NVARCHAR(10), @v_stock_err INT, @v_cantidad_err INT;
         SELECT TOP 1 @v_codigo_err = i.fkcodproducto, @v_stock_err = p.stock, @v_cantidad_err = i.cantidad
         FROM inserted i
         JOIN producto p ON p.codigo = i.fkcodproducto
         WHERE p.stock < i.cantidad;
 
         DECLARE @v_msg_err NVARCHAR(500);
-        SET @v_msg_err = CONCAT('Stock insuficiente para producto ', @v_codigo_err,
-            '. Stock disponible: ', @v_stock_err, ', cantidad solicitada: ', @v_cantidad_err);
+        SET @v_msg_err = CONCAT(N'Stock insuficiente para producto ', @v_codigo_err,
+            N'. Stock disponible: ', @v_stock_err, N', cantidad solicitada: ', @v_cantidad_err);
         THROW 50001, @v_msg_err, 1;
     END
 
@@ -235,7 +235,7 @@ BEGIN
         WHERE p.stock + d.cantidad < i.cantidad
     )
     BEGIN
-        DECLARE @v_codigo_err VARCHAR(10), @v_stock_err INT, @v_cantidad_err INT;
+        DECLARE @v_codigo_err NVARCHAR(10), @v_stock_err INT, @v_cantidad_err INT;
         SELECT TOP 1 @v_codigo_err = i.fkcodproducto, @v_stock_err = p.stock + d.cantidad, @v_cantidad_err = i.cantidad
         FROM inserted i
         JOIN deleted d ON i.fknumfactura = d.fknumfactura AND i.fkcodproducto = d.fkcodproducto
@@ -243,8 +243,8 @@ BEGIN
         WHERE p.stock + d.cantidad < i.cantidad;
 
         DECLARE @v_msg_err NVARCHAR(500);
-        SET @v_msg_err = CONCAT('Stock insuficiente para producto ', @v_codigo_err,
-            '. Stock disponible: ', @v_stock_err, ', cantidad solicitada: ', @v_cantidad_err);
+        SET @v_msg_err = CONCAT(N'Stock insuficiente para producto ', @v_codigo_err,
+            N'. Stock disponible: ', @v_stock_err, N', cantidad solicitada: ', @v_cantidad_err);
         THROW 50001, @v_msg_err, 1;
     END
 
@@ -330,7 +330,7 @@ BEGIN
     SET NOCOUNT ON;
 
     DECLARE @v_numero INT;
-    DECLARE @v_codigo VARCHAR(10);
+    DECLARE @v_codigo NVARCHAR(10);
     DECLARE @v_cantidad INT;
     DECLARE @v_minimo INT;
     DECLARE @v_count INT;
@@ -342,14 +342,14 @@ BEGIN
 
     IF @p_productos IS NULL
     BEGIN
-        SET @v_msg = CONCAT('La factura requiere minimo ', @v_minimo, ' producto(s).');
+        SET @v_msg = CONCAT(N'La factura requiere minimo ', @v_minimo, N' producto(s).');
         THROW 50002, @v_msg, 1;
     END
 
     SELECT @v_count = COUNT(*) FROM OPENJSON(@p_productos);
     IF @v_count < @v_minimo
     BEGIN
-        SET @v_msg = CONCAT('La factura requiere minimo ', @v_minimo, ' producto(s).');
+        SET @v_msg = CONCAT(N'La factura requiere minimo ', @v_minimo, N' producto(s).');
         THROW 50002, @v_msg, 1;
     END
 
@@ -406,7 +406,7 @@ BEGIN
             FOR JSON PATH
         );
 
-        SET @p_resultado = '{"factura":' + @v_factura_json + ',"productos":' + ISNULL(@v_productos_json, '[]') + '}';
+        SET @p_resultado = N'{"factura":' + @v_factura_json + N',"productos":' + ISNULL(@v_productos_json, N'[]') + N'}';
 
         COMMIT TRANSACTION;
     END TRY
@@ -446,7 +446,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM factura WHERE numero = @p_numero)
     BEGIN
         DECLARE @v_msg NVARCHAR(500);
-        SET @v_msg = CONCAT('Factura ', @p_numero, ' no existe');
+        SET @v_msg = CONCAT(N'Factura ', @p_numero, N' no existe');
         THROW 50003, @v_msg, 1;
     END
 
@@ -476,7 +476,7 @@ BEGIN
         FOR JSON PATH
     );
 
-    SET @p_resultado = '{"factura":' + @v_factura_json + ',"productos":' + ISNULL(@v_productos_json, '[]') + '}';
+    SET @p_resultado = N'{"factura":' + @v_factura_json + N',"productos":' + ISNULL(@v_productos_json, N'[]') + N'}';
 END;
 GO
 
@@ -494,7 +494,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @v_result NVARCHAR(MAX) = '[';
+    DECLARE @v_result NVARCHAR(MAX) = N'[';
     DECLARE @v_numero INT;
     DECLARE @v_factura_json NVARCHAR(MAX);
     DECLARE @v_productos_json NVARCHAR(MAX);
@@ -511,7 +511,7 @@ BEGIN
     WHILE @@FETCH_STATUS = 0
     BEGIN
         IF @v_first = 0
-            SET @v_result = @v_result + ',';
+            SET @v_result = @v_result + N',';
         SET @v_first = 0;
 
         SELECT @v_factura_json = (
@@ -537,16 +537,16 @@ BEGIN
             FOR JSON PATH
         );
 
-        SET @v_result = @v_result + '{' +
-            '"numero":' + CAST(@v_numero AS NVARCHAR) + ',' +
-            '"fecha":"' + CONVERT(NVARCHAR(30), (SELECT fecha FROM factura WHERE numero = @v_numero), 126) + '",' +
-            '"total":' + CAST((SELECT total FROM factura WHERE numero = @v_numero) AS NVARCHAR) + ',' +
-            '"fkidcliente":' + CAST((SELECT fkidcliente FROM factura WHERE numero = @v_numero) AS NVARCHAR) + ',' +
-            '"nombre_cliente":"' + (SELECT pc.nombre FROM factura f JOIN cliente c ON c.id = f.fkidcliente JOIN persona pc ON pc.codigo = c.fkcodpersona WHERE f.numero = @v_numero) + '",' +
-            '"fkidvendedor":' + CAST((SELECT fkidvendedor FROM factura WHERE numero = @v_numero) AS NVARCHAR) + ',' +
-            '"nombre_vendedor":"' + (SELECT pv.nombre FROM factura f JOIN vendedor v ON v.id = f.fkidvendedor JOIN persona pv ON pv.codigo = v.fkcodpersona WHERE f.numero = @v_numero) + '",' +
-            '"productos":' + ISNULL(@v_productos_json, '[]') +
-            '}';
+        SET @v_result = @v_result + N'{' +
+            N'"numero":' + CAST(@v_numero AS NVARCHAR) + N',' +
+            N'"fecha":"' + CONVERT(NVARCHAR(30), (SELECT fecha FROM factura WHERE numero = @v_numero), 126) + N'",' +
+            N'"total":' + CAST((SELECT total FROM factura WHERE numero = @v_numero) AS NVARCHAR) + N',' +
+            N'"fkidcliente":' + CAST((SELECT fkidcliente FROM factura WHERE numero = @v_numero) AS NVARCHAR) + N',' +
+            N'"nombre_cliente":"' + (SELECT pc.nombre FROM factura f JOIN cliente c ON c.id = f.fkidcliente JOIN persona pc ON pc.codigo = c.fkcodpersona WHERE f.numero = @v_numero) + N'",' +
+            N'"fkidvendedor":' + CAST((SELECT fkidvendedor FROM factura WHERE numero = @v_numero) AS NVARCHAR) + N',' +
+            N'"nombre_vendedor":"' + (SELECT pv.nombre FROM factura f JOIN vendedor v ON v.id = f.fkidvendedor JOIN persona pv ON pv.codigo = v.fkcodpersona WHERE f.numero = @v_numero) + N'",' +
+            N'"productos":' + ISNULL(@v_productos_json, N'[]') +
+            N'}';
 
         FETCH NEXT FROM factura_cursor INTO @v_numero;
     END
@@ -554,11 +554,11 @@ BEGIN
     CLOSE factura_cursor;
     DEALLOCATE factura_cursor;
 
-    SET @v_result = @v_result + ']';
+    SET @v_result = @v_result + N']';
 
     -- Si no hay facturas, retornar array vacio
     IF @v_first = 1
-        SET @v_result = '[]';
+        SET @v_result = N'[]';
 
     SET @p_resultado = @v_result;
 END;
@@ -587,7 +587,7 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @v_codigo VARCHAR(10);
+    DECLARE @v_codigo NVARCHAR(10);
     DECLARE @v_cantidad INT;
     DECLARE @v_minimo INT;
     DECLARE @v_count INT;
@@ -596,7 +596,7 @@ BEGIN
     -- Validaciones antes de abrir transaccion
     IF NOT EXISTS (SELECT 1 FROM factura WHERE numero = @p_numero)
     BEGIN
-        SET @v_msg = CONCAT('Factura ', @p_numero, ' no existe');
+        SET @v_msg = CONCAT(N'Factura ', @p_numero, N' no existe');
         THROW 50004, @v_msg, 1;
     END
 
@@ -604,14 +604,14 @@ BEGIN
 
     IF @p_productos IS NULL
     BEGIN
-        SET @v_msg = CONCAT('La factura requiere minimo ', @v_minimo, ' producto(s).');
+        SET @v_msg = CONCAT(N'La factura requiere minimo ', @v_minimo, N' producto(s).');
         THROW 50004, @v_msg, 1;
     END
 
     SELECT @v_count = COUNT(*) FROM OPENJSON(@p_productos);
     IF @v_count < @v_minimo
     BEGIN
-        SET @v_msg = CONCAT('La factura requiere minimo ', @v_minimo, ' producto(s).');
+        SET @v_msg = CONCAT(N'La factura requiere minimo ', @v_minimo, N' producto(s).');
         THROW 50004, @v_msg, 1;
     END
 
@@ -670,7 +670,7 @@ BEGIN
             FOR JSON PATH
         );
 
-        SET @p_resultado = '{"factura":' + @v_factura_json + ',"productos":' + ISNULL(@v_productos_json, '[]') + '}';
+        SET @p_resultado = N'{"factura":' + @v_factura_json + N',"productos":' + ISNULL(@v_productos_json, N'[]') + N'}';
 
         COMMIT TRANSACTION;
     END TRY
@@ -712,7 +712,7 @@ BEGIN
     -- Validacion antes de abrir transaccion
     IF NOT EXISTS (SELECT 1 FROM factura WHERE numero = @p_numero)
     BEGIN
-        SET @v_msg = CONCAT('Factura ', @p_numero, ' no existe');
+        SET @v_msg = CONCAT(N'Factura ', @p_numero, N' no existe');
         THROW 50005, @v_msg, 1;
     END
 
@@ -733,10 +733,10 @@ BEGIN
         DELETE FROM factura WHERE numero = @p_numero;
 
         -- Retornar resultado como JSON
-        SET @p_resultado = '{"mensaje":"Factura eliminada exitosamente",' +
-            '"numero_eliminado":' + CAST(@p_numero AS NVARCHAR) + ',' +
-            '"total_eliminado":' + CAST(@v_total AS NVARCHAR) + ',' +
-            '"productos_eliminados":' + CAST(@v_cantidad_productos AS NVARCHAR) + '}';
+        SET @p_resultado = N'{"mensaje":"Factura eliminada exitosamente",' +
+            N'"numero_eliminado":' + CAST(@p_numero AS NVARCHAR) + N',' +
+            N'"total_eliminado":' + CAST(@v_total AS NVARCHAR) + N',' +
+            N'"productos_eliminados":' + CAST(@v_cantidad_productos AS NVARCHAR) + N'}';
 
         COMMIT TRANSACTION;
     END TRY
@@ -765,8 +765,8 @@ GO
 --     "p_resultado": null }
 -- ------------------------------------------------------------
 CREATE PROCEDURE crear_usuario_con_roles
-    @p_email VARCHAR(100),
-    @p_contrasena VARCHAR(200),
+    @p_email NVARCHAR(100),
+    @p_contrasena NVARCHAR(200),
     @p_roles_json NVARCHAR(MAX),
     @p_resultado NVARCHAR(MAX) OUTPUT
 AS
@@ -808,7 +808,7 @@ BEGIN
             FOR JSON PATH
         );
 
-        SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+        SET @p_resultado = N'{"email":"' + @p_email + N'","roles":' + ISNULL(@v_roles_json, N'[]') + N'}';
 
         COMMIT TRANSACTION;
     END TRY
@@ -838,8 +838,8 @@ GO
 --     "p_resultado": null }
 -- ------------------------------------------------------------
 CREATE PROCEDURE actualizar_usuario_con_roles
-    @p_email VARCHAR(100),
-    @p_contrasena VARCHAR(200),
+    @p_email NVARCHAR(100),
+    @p_contrasena NVARCHAR(200),
     @p_roles NVARCHAR(MAX),
     @p_resultado NVARCHAR(MAX) OUTPUT
 AS
@@ -853,7 +853,7 @@ BEGIN
         BEGIN TRANSACTION;
 
         -- Actualizar la contraseña solo si no está vacía
-        IF @p_contrasena IS NOT NULL AND @p_contrasena != ''
+        IF @p_contrasena IS NOT NULL AND @p_contrasena != N''
             UPDATE usuario SET contrasena = @p_contrasena WHERE email = @p_email;
 
         -- Eliminar los roles anteriores
@@ -885,7 +885,7 @@ BEGIN
             FOR JSON PATH
         );
 
-        SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+        SET @p_resultado = N'{"email":"' + @p_email + N'","roles":' + ISNULL(@v_roles_json, N'[]') + N'}';
 
         COMMIT TRANSACTION;
     END TRY
@@ -913,7 +913,7 @@ GO
 --     "p_email": "user@correo.com", "p_resultado": null }
 -- ------------------------------------------------------------
 CREATE PROCEDURE eliminar_usuario_con_roles
-    @p_email VARCHAR(100),
+    @p_email NVARCHAR(100),
     @p_resultado NVARCHAR(MAX) OUTPUT
 AS
 BEGIN
@@ -923,7 +923,7 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = @p_email)
     BEGIN
-        SET @v_msg = CONCAT('Usuario ', @p_email, ' no existe');
+        SET @v_msg = CONCAT(N'Usuario ', @p_email, N' no existe');
         THROW 50006, @v_msg, 1;
     END
 
@@ -931,7 +931,7 @@ BEGIN
     DELETE FROM rol_usuario WHERE fkemail = @p_email;
     DELETE FROM usuario WHERE email = @p_email;
 
-    SET @p_resultado = '{"mensaje":"Usuario eliminado exitosamente","email_eliminado":"' + @p_email + '"}';
+    SET @p_resultado = N'{"mensaje":"Usuario eliminado exitosamente","email_eliminado":"' + @p_email + N'"}';
 END;
 GO
 
@@ -946,7 +946,7 @@ GO
 --     "p_resultado": null }
 -- ------------------------------------------------------------
 CREATE PROCEDURE actualizar_roles_usuario
-    @p_email VARCHAR(100),
+    @p_email NVARCHAR(100),
     @p_roles_json NVARCHAR(MAX),
     @p_resultado NVARCHAR(MAX) OUTPUT
 AS
@@ -959,7 +959,7 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = @p_email)
     BEGIN
-        SET @v_msg = CONCAT('Usuario ', @p_email, ' no existe');
+        SET @v_msg = CONCAT(N'Usuario ', @p_email, N' no existe');
         THROW 50007, @v_msg, 1;
     END
 
@@ -995,7 +995,7 @@ BEGIN
             FOR JSON PATH
         );
 
-        SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+        SET @p_resultado = N'{"email":"' + @p_email + N'","roles":' + ISNULL(@v_roles_json, N'[]') + N'}';
 
         COMMIT TRANSACTION;
     END TRY
@@ -1023,7 +1023,7 @@ GO
 --     "p_email": "admin@correo.com", "p_resultado": null }
 -- ------------------------------------------------------------
 CREATE PROCEDURE consultar_usuario_con_roles
-    @p_email VARCHAR(100),
+    @p_email NVARCHAR(100),
     @p_resultado NVARCHAR(MAX) OUTPUT
 AS
 BEGIN
@@ -1034,7 +1034,7 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = @p_email)
     BEGIN
-        SET @v_msg = CONCAT('Usuario ', @p_email, ' no existe');
+        SET @v_msg = CONCAT(N'Usuario ', @p_email, N' no existe');
         THROW 50008, @v_msg, 1;
     END
 
@@ -1046,7 +1046,7 @@ BEGIN
         FOR JSON PATH
     );
 
-    SET @p_resultado = '{"email":"' + @p_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+    SET @p_resultado = N'{"email":"' + @p_email + N'","roles":' + ISNULL(@v_roles_json, N'[]') + N'}';
 END;
 GO
 
@@ -1063,8 +1063,8 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    DECLARE @v_result NVARCHAR(MAX) = '[';
-    DECLARE @v_email VARCHAR(100);
+    DECLARE @v_result NVARCHAR(MAX) = N'[';
+    DECLARE @v_email NVARCHAR(100);
     DECLARE @v_roles_json NVARCHAR(MAX);
     DECLARE @v_first BIT = 1;
 
@@ -1077,7 +1077,7 @@ BEGIN
     WHILE @@FETCH_STATUS = 0
     BEGIN
         IF @v_first = 0
-            SET @v_result = @v_result + ',';
+            SET @v_result = @v_result + N',';
         SET @v_first = 0;
 
         SELECT @v_roles_json = (
@@ -1088,7 +1088,7 @@ BEGIN
             FOR JSON PATH
         );
 
-        SET @v_result = @v_result + '{"email":"' + @v_email + '","roles":' + ISNULL(@v_roles_json, '[]') + '}';
+        SET @v_result = @v_result + N'{"email":"' + @v_email + N'","roles":' + ISNULL(@v_roles_json, N'[]') + N'}';
 
         FETCH NEXT FROM usuario_cursor INTO @v_email;
     END
@@ -1096,10 +1096,10 @@ BEGIN
     CLOSE usuario_cursor;
     DEALLOCATE usuario_cursor;
 
-    SET @v_result = @v_result + ']';
+    SET @v_result = @v_result + N']';
 
     IF @v_first = 1
-        SET @v_result = '[]';
+        SET @v_result = N'[]';
 
     SET @p_resultado = @v_result;
 END;
@@ -1119,7 +1119,7 @@ GO
 --     "p_resultado": null }
 -- ------------------------------------------------------------
 CREATE PROCEDURE verificar_acceso_ruta
-    @p_email VARCHAR(100),
+    @p_email NVARCHAR(100),
     @p_fkidruta INT,
     @p_resultado NVARCHAR(MAX) OUTPUT
 AS
@@ -1137,8 +1137,8 @@ BEGIN
     )
         SET @v_tiene_acceso = 1;
 
-    SET @p_resultado = '{"tiene_acceso":' + CAST(@v_tiene_acceso AS NVARCHAR) +
-        ',"email":"' + @p_email + '","fkidruta":' + CAST(@p_fkidruta AS NVARCHAR) + '}';
+    SET @p_resultado = N'{"tiene_acceso":' + CAST(@v_tiene_acceso AS NVARCHAR) +
+        N',"email":"' + @p_email + N'","fkidruta":' + CAST(@p_fkidruta AS NVARCHAR) + N'}';
 END;
 GO
 
@@ -1164,7 +1164,7 @@ BEGIN
         FOR JSON PATH
     );
 
-    SET @p_resultado = ISNULL(@p_resultado, '[]');
+    SET @p_resultado = ISNULL(@p_resultado, N'[]');
 END;
 GO
 
@@ -1188,26 +1188,26 @@ BEGIN
     -- Verificar si la ruta existe
     IF NOT EXISTS (SELECT 1 FROM ruta WHERE id = @p_fkidruta)
     BEGIN
-        SET @p_resultado = '{"success":false,"message":"La ruta especificada no existe"}';
+        SET @p_resultado = N'{"success":false,"message":"La ruta especificada no existe"}';
         RETURN;
     END
 
     -- Verificar si el rol existe
     IF NOT EXISTS (SELECT 1 FROM rol WHERE id = @p_fkidrol)
     BEGIN
-        SET @p_resultado = '{"success":false,"message":"El rol especificado no existe"}';
+        SET @p_resultado = N'{"success":false,"message":"El rol especificado no existe"}';
         RETURN;
     END
 
     -- Verificar si el permiso ya existe
     IF EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = @p_fkidruta AND fkidrol = @p_fkidrol)
     BEGIN
-        SET @p_resultado = '{"success":false,"message":"El permiso ya existe"}';
+        SET @p_resultado = N'{"success":false,"message":"El permiso ya existe"}';
         RETURN;
     END
 
     INSERT INTO rutarol (fkidruta, fkidrol) VALUES (@p_fkidruta, @p_fkidrol);
-    SET @p_resultado = '{"success":true,"message":"Permiso creado exitosamente"}';
+    SET @p_resultado = N'{"success":true,"message":"Permiso creado exitosamente"}';
 END;
 GO
 
@@ -1231,12 +1231,12 @@ BEGIN
     -- Verificar si el permiso existe
     IF NOT EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = @p_fkidruta AND fkidrol = @p_fkidrol)
     BEGIN
-        SET @p_resultado = '{"success":false,"message":"El permiso no existe"}';
+        SET @p_resultado = N'{"success":false,"message":"El permiso no existe"}';
         RETURN;
     END
 
     DELETE FROM rutarol WHERE fkidruta = @p_fkidruta AND fkidrol = @p_fkidrol;
-    SET @p_resultado = '{"success":true,"message":"Permiso eliminado exitosamente"}';
+    SET @p_resultado = N'{"success":true,"message":"Permiso eliminado exitosamente"}';
 END;
 GO
 
@@ -1246,82 +1246,82 @@ GO
 
 -- Empresas
 INSERT INTO empresa (codigo, nombre) VALUES
-('E001', 'Comercial Los Andes S.A.'),
-('E002', 'Distribuciones El Centro S.A.'),
-('E999', 'Empresa Test');
+(N'E001', N'Comercial Los Andes S.A.'),
+(N'E002', N'Distribuciones El Centro S.A.'),
+(N'E999', N'Empresa Test');
 
 -- Personas
 INSERT INTO persona (codigo, nombre, email, telefono) VALUES
-('P001', 'Ana Torres', 'ana.torres@correo.com', '3011111111'),
-('P002', 'Carlos Pérez', 'carlos.perez@correo.com', '3022222222'),
-('P003', 'María Gómez', 'maria.gomez@correo.com', '3033333333'),
-('P004', 'Juan Díaz', 'juan.diaz@correo.com', '3044444444'),
-('P005', 'Laura Rojas', 'laura.rojas@correo.com', '3055555555'),
-('P006', 'Pedro Castillo', 'pedro.castillo@correo.com', '3066666666');
+(N'P001', N'Ana Torres', N'ana.torres@correo.com', N'3011111111'),
+(N'P002', N'Carlos Pérez', N'carlos.perez@correo.com', N'3022222222'),
+(N'P003', N'María Gómez', N'maria.gomez@correo.com', N'3033333333'),
+(N'P004', N'Juan Díaz', N'juan.diaz@correo.com', N'3044444444'),
+(N'P005', N'Laura Rojas', N'laura.rojas@correo.com', N'3055555555'),
+(N'P006', N'Pedro Castillo', N'pedro.castillo@correo.com', N'3066666666');
 
 -- Productos
 INSERT INTO producto (codigo, nombre, stock, valorunitario) VALUES
-('PR001', 'Laptop Lenovo IdeaPad', 17, 2500000),
-('PR002', 'Monitor Samsung 24"', 27, 800000),
-('PR003', 'Teclado Logitech K380', 42, 150000),
-('PR004', 'Mouse HP', 55, 90000),
-('PR005', 'Impresora Epson EcoTank1', 14, 1100000),
-('PR006', 'Auriculares Sony WH-CH510', 23, 240000),
-('PR007', 'Tablet Samsung Tab A9', 15, 950000),
-('PR008', 'Disco Duro Seagate 1TB', 32, 280000);
+(N'PR001', N'Laptop Lenovo IdeaPad', 17, 2500000),
+(N'PR002', N'Monitor Samsung 24"', 27, 800000),
+(N'PR003', N'Teclado Logitech K380', 42, 150000),
+(N'PR004', N'Mouse HP', 55, 90000),
+(N'PR005', N'Impresora Epson EcoTank1', 14, 1100000),
+(N'PR006', N'Auriculares Sony WH-CH510', 23, 240000),
+(N'PR007', N'Tablet Samsung Tab A9', 15, 950000),
+(N'PR008', N'Disco Duro Seagate 1TB', 32, 280000);
 
 -- Roles (con IDENTITY_INSERT para IDs explícitos)
 SET IDENTITY_INSERT rol ON;
 INSERT INTO rol (id, nombre) VALUES
-(1, 'Administrador'),
-(2, 'Vendedor'),
-(3, 'Cajero'),
-(4, 'Contador'),
-(5, 'Cliente');
+(1, N'Administrador'),
+(2, N'Vendedor'),
+(3, N'Cajero'),
+(4, N'Contador'),
+(5, N'Cliente');
 SET IDENTITY_INSERT rol OFF;
 
 -- Rutas
 INSERT INTO ruta (ruta, descripcion) VALUES
-('/home', 'Página principal - Dashboard'),
-('/usuarios', 'Gestión de usuarios'),
-('/facturas', 'Gestión de facturas'),
-('/clientes', 'Gestión de clientes'),
-('/vendedores', 'Gestión de vendedores'),
-('/personas', 'Gestión de personas'),
-('/empresas', 'Gestión de empresas'),
-('/productos', 'Gestión de productos'),
-('/roles', 'Gestión de roles'),
-('/permisos', 'Gestión de permisos (asignación rol-ruta)'),
-('/permisos/crear', 'Crear permiso (POST)'),
-('/permisos/eliminar', 'Eliminar permiso (POST)'),
-('/rutas', 'Gestión de rutas del sistema'),
-('/rutas/crear', 'Crear ruta (POST)'),
-('/rutas/eliminar', 'Eliminar ruta (POST)');
+(N'/home', N'Página principal - Dashboard'),
+(N'/usuarios', N'Gestión de usuarios'),
+(N'/facturas', N'Gestión de facturas'),
+(N'/clientes', N'Gestión de clientes'),
+(N'/vendedores', N'Gestión de vendedores'),
+(N'/personas', N'Gestión de personas'),
+(N'/empresas', N'Gestión de empresas'),
+(N'/productos', N'Gestión de productos'),
+(N'/roles', N'Gestión de roles'),
+(N'/permisos', N'Gestión de permisos (asignación rol-ruta)'),
+(N'/permisos/crear', N'Crear permiso (POST)'),
+(N'/permisos/eliminar', N'Eliminar permiso (POST)'),
+(N'/rutas', N'Gestión de rutas del sistema'),
+(N'/rutas/crear', N'Crear ruta (POST)'),
+(N'/rutas/eliminar', N'Eliminar ruta (POST)');
 
 -- Usuarios
 INSERT INTO usuario (email, contrasena) VALUES
-('admin@correo.com', '$2a$12$3UgI.Eof.FhzsYUWESI9n.qFaqkV2JPhvW3L/1GTKowNJnGaD8F.G'),
-('vendedor1@correo.com', '$2a$12$Dgog4VaHqMzhliPVJy1BcOMd6.izEGNeRDtZ.O7SPmBLc6UVthVTG'),
-('jefe@correo.com', 'jefe123'),
-('cliente1@correo.com', 'cli123'),
-('test_encript@correo.com', '$2a$11$Ci0J2yBltDgQHfjadgkl0OtbcF5pUf97vTq/4Xr0KEU/86l8ybjBe'),
-('nuevo@correo.com', '$2a$11$cmtGBxllwc7MCzpnKVSWuumiOgCaG6PaKWcN1z9N0bjjnkobbFDzO');
+(N'admin@correo.com', N'$2a$12$3UgI.Eof.FhzsYUWESI9n.qFaqkV2JPhvW3L/1GTKowNJnGaD8F.G'),
+(N'vendedor1@correo.com', N'$2a$12$Dgog4VaHqMzhliPVJy1BcOMd6.izEGNeRDtZ.O7SPmBLc6UVthVTG'),
+(N'jefe@correo.com', N'jefe123'),
+(N'cliente1@correo.com', N'cli123'),
+(N'test_encript@correo.com', N'$2a$11$Ci0J2yBltDgQHfjadgkl0OtbcF5pUf97vTq/4Xr0KEU/86l8ybjBe'),
+(N'nuevo@correo.com', N'$2a$11$cmtGBxllwc7MCzpnKVSWuumiOgCaG6PaKWcN1z9N0bjjnkobbFDzO');
 
 -- Clientes (con IDENTITY_INSERT para IDs explícitos)
 SET IDENTITY_INSERT cliente ON;
 INSERT INTO cliente (id, credito, fkcodpersona, fkcodempresa) VALUES
-(1, 520000, 'P001', 'E001'),
-(2, 250000, 'P003', 'E002'),
-(3, 400000, 'P005', 'E001'),
-(5, 700000, 'P006', 'E001');
+(1, 520000, N'P001', N'E001'),
+(2, 250000, N'P003', N'E002'),
+(3, 400000, N'P005', N'E001'),
+(5, 700000, N'P006', N'E001');
 SET IDENTITY_INSERT cliente OFF;
 
 -- Vendedores (con IDENTITY_INSERT para IDs explícitos)
 SET IDENTITY_INSERT vendedor ON;
 INSERT INTO vendedor (id, carnet, direccion, fkcodpersona) VALUES
-(1, 1001, 'Calle 10 #5-33', 'P002'),
-(2, 1002, 'Carrera 15 #7-20', 'P004'),
-(3, 1003, 'Avenida 30 #18-09', 'P006');
+(1, 1001, N'Calle 10 #5-33', N'P002'),
+(2, 1002, N'Carrera 15 #7-20', N'P004'),
+(3, 1003, N'Avenida 30 #18-09', N'P006');
 SET IDENTITY_INSERT vendedor OFF;
 
 -- Facturas (con IDENTITY_INSERT para IDs explícitos)
@@ -1335,28 +1335,28 @@ GO
 
 SET IDENTITY_INSERT factura ON;
 INSERT INTO factura (numero, fecha, total, fkidcliente, fkidvendedor) VALUES
-(1, '2025-12-03 12:57:19.2759200', 5000000, 1, 1),
-(2, '2025-12-03 12:57:19.2759200', 1250000, 2, 2),
-(3, '2025-12-03 12:57:19.2759200', 2030000, 3, 3),
-(4, '2025-12-03 13:04:59.0286130', 950000, 1, 1),
-(5, '2025-12-03 13:05:17.8743850', 2740000, 2, 2),
-(6, '2025-12-03 13:05:35.0284600', 4850000, 3, 3);
+(1, N'2025-12-03 12:57:19.2759200', 5000000, 1, 1),
+(2, N'2025-12-03 12:57:19.2759200', 1250000, 2, 2),
+(3, N'2025-12-03 12:57:19.2759200', 2030000, 3, 3),
+(4, N'2025-12-03 13:04:59.0286130', 950000, 1, 1),
+(5, N'2025-12-03 13:05:17.8743850', 2740000, 2, 2),
+(6, N'2025-12-03 13:05:35.0284600', 4850000, 3, 3);
 SET IDENTITY_INSERT factura OFF;
 
 -- Productos por factura (triggers deshabilitados, insertamos subtotales directamente)
 INSERT INTO productosporfactura (fknumfactura, fkcodproducto, cantidad, subtotal) VALUES
-(1, 'PR001', 2, 5000000),
-(2, 'PR002', 1, 800000),
-(2, 'PR003', 3, 450000),
-(3, 'PR004', 5, 450000),
-(3, 'PR005', 1, 1100000),
-(3, 'PR006', 2, 480000),
-(4, 'PR007', 1, 950000),
-(5, 'PR007', 2, 1900000),
-(5, 'PR008', 3, 840000),
-(6, 'PR001', 1, 2500000),
-(6, 'PR002', 2, 1600000),
-(6, 'PR003', 5, 750000);
+(1, N'PR001', 2, 5000000),
+(2, N'PR002', 1, 800000),
+(2, N'PR003', 3, 450000),
+(3, N'PR004', 5, 450000),
+(3, N'PR005', 1, 1100000),
+(3, N'PR006', 2, 480000),
+(4, N'PR007', 1, 950000),
+(5, N'PR007', 2, 1900000),
+(5, N'PR008', 3, 840000),
+(6, N'PR001', 1, 2500000),
+(6, N'PR002', 2, 1600000),
+(6, N'PR003', 5, 750000);
 
 -- Rehabilitar triggers
 ENABLE TRIGGER trg_prodfact_insert ON productosporfactura;
@@ -1366,17 +1366,17 @@ GO
 
 -- Roles por usuario
 INSERT INTO rol_usuario (fkemail, fkidrol) VALUES
-('admin@correo.com', 1),
-('vendedor1@correo.com', 2),
-('vendedor1@correo.com', 3),
-('jefe@correo.com', 1),
-('jefe@correo.com', 3),
-('jefe@correo.com', 4),
-('cliente1@correo.com', 5),
-('test_encript@correo.com', 1),
-('nuevo@correo.com', 1),
-('nuevo@correo.com', 2),
-('nuevo@correo.com', 3);
+(N'admin@correo.com', 1),
+(N'vendedor1@correo.com', 2),
+(N'vendedor1@correo.com', 3),
+(N'jefe@correo.com', 1),
+(N'jefe@correo.com', 3),
+(N'jefe@correo.com', 4),
+(N'cliente1@correo.com', 5),
+(N'test_encript@correo.com', 1),
+(N'nuevo@correo.com', 1),
+(N'nuevo@correo.com', 2),
+(N'nuevo@correo.com', 3);
 
 -- Rutas por rol
 -- Rutas por rol (fkidruta, fkidrol)

@@ -13,6 +13,10 @@ CREATE DATABASE IF NOT EXISTS bdfacturas_mariadb_local
 
 USE bdfacturas_mariadb_local;
 
+-- Forzar UTF-8 en la conexión para que los INSERT guarden bien las tildes
+SET NAMES utf8mb4;
+SET CHARACTER SET utf8mb4;
+
 -- ================================================================
 -- ELIMINAR OBJETOS EXISTENTES (para poder re-ejecutar el script)
 -- ================================================================
