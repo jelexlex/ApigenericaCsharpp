@@ -608,22 +608,26 @@ public async Task<DataTable> EjecutarProcedimientoAlmacenadoConDictionaryAsync(
                 ) uq ON c.TABLE_SCHEMA = uq.TABLE_SCHEMA
                     AND c.TABLE_NAME = uq.TABLE_NAME
                     AND c.COLUMN_NAME = uq.COLUMN_NAME
-                -- Foreign Key
+                -- Foreign Key (usa REFERENTIAL_CONSTRAINTS para obtener la tabla referenciada)
                 LEFT JOIN (
                     SELECT
                         kcu.TABLE_SCHEMA,
                         kcu.TABLE_NAME,
                         kcu.COLUMN_NAME,
-                        ccu.TABLE_NAME AS foreign_table_name,
-                        ccu.COLUMN_NAME AS foreign_column_name,
+                        kcu2.TABLE_NAME AS foreign_table_name,
+                        kcu2.COLUMN_NAME AS foreign_column_name,
                         tc.CONSTRAINT_NAME AS fk_constraint_name
                     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
                     JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
                         ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
                         AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
-                    JOIN INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE ccu
-                        ON tc.CONSTRAINT_NAME = ccu.CONSTRAINT_NAME
-                        AND tc.TABLE_SCHEMA = ccu.TABLE_SCHEMA
+                    JOIN INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+                        ON tc.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+                        AND tc.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA
+                    JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu2
+                        ON rc.UNIQUE_CONSTRAINT_NAME = kcu2.CONSTRAINT_NAME
+                        AND rc.UNIQUE_CONSTRAINT_SCHEMA = kcu2.TABLE_SCHEMA
+                        AND kcu.ORDINAL_POSITION = kcu2.ORDINAL_POSITION
                     WHERE tc.CONSTRAINT_TYPE = 'FOREIGN KEY'
                 ) fk ON c.TABLE_SCHEMA = fk.TABLE_SCHEMA
                     AND c.TABLE_NAME = fk.TABLE_NAME
