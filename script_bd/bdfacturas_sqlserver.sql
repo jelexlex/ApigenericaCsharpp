@@ -1283,20 +1283,20 @@ SET IDENTITY_INSERT rol OFF;
 -- Rutas
 INSERT INTO ruta (ruta, descripcion) VALUES
 (N'/home', N'Página principal - Dashboard'),
-(N'/usuarios', N'Gestión de usuarios'),
-(N'/facturas', N'Gestión de facturas'),
-(N'/clientes', N'Gestión de clientes'),
-(N'/vendedores', N'Gestión de vendedores'),
-(N'/personas', N'Gestión de personas'),
-(N'/empresas', N'Gestión de empresas'),
-(N'/productos', N'Gestión de productos'),
-(N'/roles', N'Gestión de roles'),
-(N'/permisos', N'Gestión de permisos (asignación rol-ruta)'),
-(N'/permisos/crear', N'Crear permiso (POST)'),
-(N'/permisos/eliminar', N'Eliminar permiso (POST)'),
-(N'/rutas', N'Gestión de rutas del sistema'),
-(N'/rutas/crear', N'Crear ruta (POST)'),
-(N'/rutas/eliminar', N'Eliminar ruta (POST)');
+(N'/usuario', N'Gestión de usuarios'),
+(N'/factura', N'Gestión de facturas'),
+(N'/cliente', N'Gestión de clientes'),
+(N'/vendedor', N'Gestión de vendedores'),
+(N'/persona', N'Gestión de personas'),
+(N'/empresa', N'Gestión de empresas'),
+(N'/producto', N'Gestión de productos'),
+(N'/rol', N'Gestión de roles'),
+(N'/permiso', N'Gestión de permisos (asignación rol-ruta)'),
+(N'/permiso/crear', N'Crear permiso (POST)'),
+(N'/permiso/eliminar', N'Eliminar permiso (POST)'),
+(N'/ruta', N'Gestión de rutas del sistema'),
+(N'/ruta/crear', N'Crear ruta (POST)'),
+(N'/ruta/eliminar', N'Eliminar ruta (POST)');
 
 -- Usuarios
 INSERT INTO usuario (email, contrasena) VALUES

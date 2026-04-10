@@ -686,20 +686,20 @@ CALL crear_factura_con_detalle(3, 3, '2025-10-17 00:00:00', '[{"fkcodproducto":"
 -- Rutas del sistema
 INSERT INTO ruta (ruta, descripcion) VALUES
 ('/home', 'Página principal - Dashboard'),
-('/usuarios', 'Gestión de usuarios'),
-('/facturas', 'Gestión de facturas'),
-('/clientes', 'Gestión de clientes'),
-('/vendedores', 'Gestión de vendedores'),
-('/personas', 'Gestión de personas'),
-('/empresas', 'Gestión de empresas'),
-('/productos', 'Gestión de productos'),
-('/roles', 'Gestión de roles'),
-('/permisos', 'Gestión de permisos (asignación rol-ruta)'),
-('/permisos/crear', 'Crear permiso (POST)'),
-('/permisos/eliminar', 'Eliminar permiso (POST)'),
-('/rutas', 'Gestión de rutas del sistema'),
-('/rutas/crear', 'Crear ruta (POST)'),
-('/rutas/eliminar', 'Eliminar ruta (POST)');
+('/usuario', 'Gestión de usuarios'),
+('/factura', 'Gestión de facturas'),
+('/cliente', 'Gestión de clientes'),
+('/vendedor', 'Gestión de vendedores'),
+('/persona', 'Gestión de personas'),
+('/empresa', 'Gestión de empresas'),
+('/producto', 'Gestión de productos'),
+('/rol', 'Gestión de roles'),
+('/permiso', 'Gestión de permisos (asignación rol-ruta)'),
+('/permiso/crear', 'Crear permiso (POST)'),
+('/permiso/eliminar', 'Eliminar permiso (POST)'),
+('/ruta', 'Gestión de rutas del sistema'),
+('/ruta/crear', 'Crear ruta (POST)'),
+('/ruta/eliminar', 'Eliminar ruta (POST)');
 
 -- Rutas por rol (fkidruta, fkidrol)
 -- Rutas: 1=/home,2=/usuarios,3=/facturas,4=/clientes,5=/vendedores,6=/personas,7=/empresas,8=/productos,9=/roles,10=/permisos,11=/permisos/crear,12=/permisos/eliminar,13=/rutas,14=/rutas/crear,15=/rutas/eliminar
