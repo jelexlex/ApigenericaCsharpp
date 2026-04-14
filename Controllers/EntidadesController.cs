@@ -178,7 +178,7 @@ namespace ApiGenericaCsharp.Controllers
         /// Todas las respuestas incluyen información estructurada para facilitar el uso de la API.
         /// </returns>
         //[AllowAnonymous]                                  // Permite acceso sin autenticación (apropiado para desarrollo)
-        //[Authorize]
+        [Authorize]
         [HttpGet]                                        // Responde exclusivamente a peticiones HTTP GET
         public async Task<IActionResult> ListarAsync(
             string tabla,                                 // Del path de la URL: /api/{tabla}
