@@ -1305,7 +1305,9 @@ INSERT INTO usuario (email, contrasena) VALUES
 (N'jefe@correo.com', N'jefe123'),
 (N'cliente1@correo.com', N'cli123'),
 (N'test_encript@correo.com', N'$2a$11$Ci0J2yBltDgQHfjadgkl0OtbcF5pUf97vTq/4Xr0KEU/86l8ybjBe'),
-(N'nuevo@correo.com', N'$2a$11$cmtGBxllwc7MCzpnKVSWuumiOgCaG6PaKWcN1z9N0bjjnkobbFDzO');
+(N'nuevo@correo.com', N'$2a$11$cmtGBxllwc7MCzpnKVSWuumiOgCaG6PaKWcN1z9N0bjjnkobbFDzO'),
+(N'carlos.castro@usbmed.edu.co', N'$2a$10$YYl6bHCflCnk8suUrms3ie.rnpLvfD9nHJtehZwhcSkINelGwt6iC'),
+(N'carloscastro5033@correo.itm.edu.co', N'$2a$10$YYl6bHCflCnk8suUrms3ie.rnpLvfD9nHJtehZwhcSkINelGwt6iC');
 
 -- Clientes (con IDENTITY_INSERT para IDs explícitos)
 SET IDENTITY_INSERT cliente ON;
@@ -1376,7 +1378,17 @@ INSERT INTO rol_usuario (fkemail, fkidrol) VALUES
 (N'test_encript@correo.com', 1),
 (N'nuevo@correo.com', 1),
 (N'nuevo@correo.com', 2),
-(N'nuevo@correo.com', 3);
+(N'nuevo@correo.com', 3),
+(N'carlos.castro@usbmed.edu.co', 1),
+(N'carlos.castro@usbmed.edu.co', 2),
+(N'carlos.castro@usbmed.edu.co', 3),
+(N'carlos.castro@usbmed.edu.co', 4),
+(N'carlos.castro@usbmed.edu.co', 5),
+(N'carloscastro5033@correo.itm.edu.co', 1),
+(N'carloscastro5033@correo.itm.edu.co', 2),
+(N'carloscastro5033@correo.itm.edu.co', 3),
+(N'carloscastro5033@correo.itm.edu.co', 4),
+(N'carloscastro5033@correo.itm.edu.co', 5);
 
 -- Rutas por rol
 -- Rutas por rol (fkidruta, fkidrol)

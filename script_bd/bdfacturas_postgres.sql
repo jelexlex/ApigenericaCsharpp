@@ -179,7 +179,9 @@ INSERT INTO usuario (email, contrasena) VALUES
 ('jefe@correo.com', 'jefe123'),
 ('cliente1@correo.com', 'cli123'),
 ('test_encript@correo.com', '$2a$11$Ci0J2yBltDgQHfjadgkl0OtbcF5pUf97vTq/4Xr0KEU/86l8ybjBe'),
-('nuevo@correo.com', '$2a$11$cmtGBxllwc7MCzpnKVSWuumiOgCaG6PaKWcN1z9N0bjjnkobbFDzO');
+('nuevo@correo.com', '$2a$11$cmtGBxllwc7MCzpnKVSWuumiOgCaG6PaKWcN1z9N0bjjnkobbFDzO'),
+('carlos.castro@usbmed.edu.co', '$2a$10$YYl6bHCflCnk8suUrms3ie.rnpLvfD9nHJtehZwhcSkINelGwt6iC'),
+('carloscastro5033@correo.itm.edu.co', '$2a$10$YYl6bHCflCnk8suUrms3ie.rnpLvfD9nHJtehZwhcSkINelGwt6iC');
 
 -- Clientes
 INSERT INTO cliente (id, credito, fkcodpersona, fkcodempresa) VALUES
@@ -239,7 +241,17 @@ INSERT INTO rol_usuario (fkemail, fkidrol) VALUES
 ('test_encript@correo.com', 1),
 ('nuevo@correo.com', 1),
 ('nuevo@correo.com', 2),
-('nuevo@correo.com', 3);
+('nuevo@correo.com', 3),
+('carlos.castro@usbmed.edu.co', 1),
+('carlos.castro@usbmed.edu.co', 2),
+('carlos.castro@usbmed.edu.co', 3),
+('carlos.castro@usbmed.edu.co', 4),
+('carlos.castro@usbmed.edu.co', 5),
+('carloscastro5033@correo.itm.edu.co', 1),
+('carloscastro5033@correo.itm.edu.co', 2),
+('carloscastro5033@correo.itm.edu.co', 3),
+('carloscastro5033@correo.itm.edu.co', 4),
+('carloscastro5033@correo.itm.edu.co', 5);
 
 -- Rutas por rol
 -- Rutas por rol (fkidruta, fkidrol)

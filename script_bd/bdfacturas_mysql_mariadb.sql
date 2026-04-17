@@ -677,6 +677,8 @@ CALL crear_usuario_con_roles('admin@correo.com', 'admin123', '[{"fkidrol":1}]');
 CALL crear_usuario_con_roles('vendedor1@correo.com', 'vend123', '[{"fkidrol":2},{"fkidrol":3}]');
 CALL crear_usuario_con_roles('jefe@correo.com', 'jefe123', '[{"fkidrol":1},{"fkidrol":3},{"fkidrol":4}]');
 CALL crear_usuario_con_roles('cliente1@correo.com', 'cli123', '[{"fkidrol":5}]');
+CALL crear_usuario_con_roles('carlos.castro@usbmed.edu.co', '1234567', '[{"fkidrol":1},{"fkidrol":2},{"fkidrol":3},{"fkidrol":4},{"fkidrol":5}]');
+CALL crear_usuario_con_roles('carloscastro5033@correo.itm.edu.co', '1234567', '[{"fkidrol":1},{"fkidrol":2},{"fkidrol":3},{"fkidrol":4},{"fkidrol":5}]');
 
 -- Facturas
 CALL crear_factura_con_detalle(1, 1, '2025-10-15 00:00:00', '[{"fkcodproducto":"PR001","cantidad":1},{"fkcodproducto":"PR004","cantidad":2}]', 1);
