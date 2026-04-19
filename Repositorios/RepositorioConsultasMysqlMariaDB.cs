@@ -119,6 +119,8 @@ namespace ApiGenericaCsharp.Repositorios
 
         /// <summary>
         /// Ejecuta procedimiento almacenado → DataTable
+        /// Usa INFORMATION_SCHEMA para ordenar parámetros por posición (MariaDB usa CALL posicional)
+        /// y detectar parámetros OUT/INOUT para la estrategia de variables de sesión.
         /// </summary>
         public async Task<DataTable> EjecutarProcedimientoAlmacenadoAsync(
             string nombreSP,
@@ -134,12 +136,14 @@ namespace ApiGenericaCsharp.Repositorios
             await using var conexion = new MySqlConnection(cadena);
             await conexion.OpenAsync();
 
-            // Consultar metadatos para detectar parámetros OUT/INOUT
+            // Consultar metadatos para obtener TODOS los parámetros ordenados por posición
+            var metadatosSP = new List<(string Nombre, string Modo)>();
             var parametrosOut = new List<string>();
             var db = DatabaseActual(conexion);
             var sqlMeta = @"SELECT PARAMETER_NAME, PARAMETER_MODE
                             FROM INFORMATION_SCHEMA.PARAMETERS
                             WHERE SPECIFIC_SCHEMA = @db AND SPECIFIC_NAME = @sp
+                              AND PARAMETER_NAME IS NOT NULL
                             ORDER BY ORDINAL_POSITION";
             await using (var cmdMeta = new MySqlCommand(sqlMeta, conexion))
             {
@@ -148,41 +152,68 @@ namespace ApiGenericaCsharp.Repositorios
                 await using var reader = await cmdMeta.ExecuteReaderAsync();
                 while (await reader.ReadAsync())
                 {
+                    var nombre = reader.IsDBNull(0) ? "" : reader.GetString(0);
                     var modo = reader.IsDBNull(1) ? "IN" : reader.GetString(1);
-                    if (modo == "OUT" || modo == "INOUT")
-                        parametrosOut.Add(reader.IsDBNull(0) ? "" : reader.GetString(0));
+                    if (!string.IsNullOrEmpty(nombre))
+                    {
+                        metadatosSP.Add((nombre, modo));
+                        if (modo == "OUT" || modo == "INOUT")
+                            parametrosOut.Add(nombre);
+                    }
                 }
             }
 
-            if (parametrosOut.Count > 0 && parametros != null)
+            // Construir diccionario de parámetros enviados por la API (por nombre, case-insensitive)
+            var parametrosDict = new Dictionary<string, SqlParameter>(StringComparer.OrdinalIgnoreCase);
+            if (parametros != null)
             {
-                // Estrategia para OUT/INOUT: usar variables de sesión MySQL
-                // 1. SET @param = valor para cada parámetro
-                // 2. CALL sp(@param1, @param2, ...)
-                // 3. SELECT variables OUT
-
-                // SET session variables
                 foreach (var p in parametros)
                 {
-                    string nombre = p.ParameterName?.StartsWith("@") == true ? p.ParameterName : $"@{p.ParameterName}";
-                    var valor = p.Value == null || p.Value == DBNull.Value ? "NULL" : $"'{p.Value.ToString()!.Replace("'", "''")}'";
-                    var sqlSet = $"SET {nombre} = {valor}";
+                    string clave = p.ParameterName?.TrimStart('@') ?? "";
+                    if (!string.IsNullOrEmpty(clave))
+                        parametrosDict[clave] = p;
+                }
+            }
+
+            if (parametrosOut.Count > 0)
+            {
+                // Estrategia para OUT/INOUT: usar variables de sesión MySQL
+                // 1. SET @param = valor para cada parámetro (en orden del SP)
+                // 2. CALL sp(@param1, @param2, ...) en orden del SP
+                // 3. SELECT variables OUT
+
+                // SET session variables para TODOS los parámetros del SP (en orden)
+                foreach (var (nombre, modo) in metadatosSP)
+                {
+                    string varName = $"@{nombre}";
+                    string valor;
+
+                    if (parametrosDict.TryGetValue(nombre, out var param))
+                    {
+                        valor = param.Value == null || param.Value == DBNull.Value
+                            ? "NULL"
+                            : $"'{param.Value.ToString()!.Replace("'", "''")}'";
+                    }
+                    else
+                    {
+                        // Parámetro no enviado por la API → NULL (el SP maneja defaults con COALESCE)
+                        valor = "NULL";
+                    }
+
+                    var sqlSet = $"SET {varName} = {valor}";
                     await using var cmdSet = new MySqlCommand(sqlSet, conexion);
                     await cmdSet.ExecuteNonQueryAsync();
                 }
 
-                // CALL with session variable names (no bound parameters)
-                var nombres = parametros.Select(p =>
-                    p.ParameterName?.StartsWith("@") == true ? p.ParameterName : $"@{p.ParameterName}").ToList();
-                var placeholdersCall = string.Join(", ", nombres);
+                // CALL con variables de sesión en el ORDEN del SP (no del dictionary)
+                var placeholdersCall = string.Join(", ", metadatosSP.Select(m => $"@{m.Nombre}"));
                 string sqlCall = $"CALL {nombreSP}({placeholdersCall})";
                 await using (var cmdCall = new MySqlCommand(sqlCall, conexion))
                 {
-                    // No agregar parámetros bound - usamos variables de sesión
                     await cmdCall.ExecuteNonQueryAsync();
                 }
 
-                // SELECT OUT variables
+                // SELECT variables OUT
                 var selectVars = string.Join(", ", parametrosOut.Select(n =>
                     $"@{n} AS `@{n}`"));
                 string sqlSelect = $"SELECT {selectVars}";
@@ -190,9 +221,34 @@ namespace ApiGenericaCsharp.Repositorios
                 await using var lectorSelect = await cmdSelect.ExecuteReaderAsync();
                 tabla.Load(lectorSelect);
             }
+            else if (metadatosSP.Count > 0)
+            {
+                // Sin OUT params pero con metadatos: ordenar parámetros según el SP
+                var nombresOrdenados = new List<string>();
+                foreach (var (nombre, _) in metadatosSP)
+                {
+                    nombresOrdenados.Add($"@{nombre}");
+                }
+                var placeholders = string.Join(", ", nombresOrdenados);
+                string sqlCall = $"CALL {nombreSP}({placeholders})";
+                await using var cmdCall = new MySqlCommand(sqlCall, conexion);
+
+                // Agregar parámetros en orden del SP
+                foreach (var (nombre, _) in metadatosSP)
+                {
+                    object valor = DBNull.Value;
+                    if (parametrosDict.TryGetValue(nombre, out var param))
+                        valor = param.Value ?? DBNull.Value;
+
+                    cmdCall.Parameters.AddWithValue($"@{nombre}", valor);
+                }
+
+                await using var lectorCall = await cmdCall.ExecuteReaderAsync(CommandBehavior.SequentialAccess);
+                tabla.Load(lectorCall);
+            }
             else
             {
-                // Sin OUT params: comportamiento original
+                // Sin metadatos (SP no encontrado en INFORMATION_SCHEMA): comportamiento original
                 var placeholders = ConstruirPlaceholders(parametros);
                 string sqlCall = $"CALL {nombreSP}({placeholders})";
                 await using var cmdCall = new MySqlCommand(sqlCall, conexion);

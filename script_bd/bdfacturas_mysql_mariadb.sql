@@ -1,6 +1,6 @@
 -- ==============================================================
 --  BASE DE DATOS FACTURACIÓN - MySQL/MariaDB 10.4+
---  Conversión completa desde PostgreSQL
+--  Conversión completa desde SQL Server / PostgreSQL
 --  Incluye: Tablas, Triggers, Stored Procedures, Datos y RBAC
 -- ==============================================================
 
@@ -20,10 +20,16 @@ SET CHARACTER SET utf8mb4;
 -- ================================================================
 -- ELIMINAR OBJETOS EXISTENTES (para poder re-ejecutar el script)
 -- ================================================================
+DROP PROCEDURE IF EXISTS sp_insertar_factura_y_productosporfactura;
+DROP PROCEDURE IF EXISTS sp_consultar_factura_y_productosporfactura;
+DROP PROCEDURE IF EXISTS sp_listar_facturas_y_productosporfactura;
+DROP PROCEDURE IF EXISTS sp_actualizar_factura_y_productosporfactura;
+DROP PROCEDURE IF EXISTS sp_borrar_factura_y_productosporfactura;
+-- Limpiar nombres viejos (versiones anteriores del script)
 DROP PROCEDURE IF EXISTS crear_factura_con_detalle;
+DROP PROCEDURE IF EXISTS consultar_factura_con_detalle;
 DROP PROCEDURE IF EXISTS actualizar_factura_con_detalle;
 DROP PROCEDURE IF EXISTS eliminar_factura_con_detalle;
-DROP PROCEDURE IF EXISTS consultar_factura_con_detalle;
 DROP PROCEDURE IF EXISTS crear_usuario_con_roles;
 DROP PROCEDURE IF EXISTS actualizar_usuario_con_roles;
 DROP PROCEDURE IF EXISTS eliminar_usuario_con_roles;
@@ -51,176 +57,205 @@ DROP TABLE IF EXISTS persona;
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ================================================================
--- TABLAS BASE
+-- TABLAS BASE (sin foreign keys)
 -- ================================================================
+CREATE TABLE empresa (
+    codigo VARCHAR(10) NOT NULL,
+    nombre VARCHAR(100) NOT NULL,
+    CONSTRAINT pk_empresa PRIMARY KEY (codigo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE persona (
-    codigo VARCHAR(20) PRIMARY KEY,
+    codigo VARCHAR(10) NOT NULL,
     nombre VARCHAR(100) NOT NULL,
     email VARCHAR(100) NOT NULL,
-    telefono VARCHAR(20) NOT NULL
+    telefono VARCHAR(20) NOT NULL,
+    CONSTRAINT pk_persona PRIMARY KEY (codigo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE empresa (
-    codigo VARCHAR(10) PRIMARY KEY,
-    nombre VARCHAR(200) NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE usuario (
-    email VARCHAR(100) PRIMARY KEY,
-    contrasena VARCHAR(100) NOT NULL
+CREATE TABLE producto (
+    codigo VARCHAR(10) NOT NULL,
+    nombre VARCHAR(100) NOT NULL,
+    stock INT NOT NULL,
+    valorunitario DECIMAL(18,2) NOT NULL,
+    CONSTRAINT pk_producto PRIMARY KEY (codigo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE rol (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    nombre VARCHAR(100) UNIQUE NOT NULL
+    id INT AUTO_INCREMENT NOT NULL,
+    nombre VARCHAR(50) NOT NULL,
+    CONSTRAINT pk_rol PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE ruta (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    ruta VARCHAR(100) NOT NULL UNIQUE,
-    descripcion VARCHAR(255) NOT NULL
+    id INT AUTO_INCREMENT NOT NULL,
+    ruta VARCHAR(100) NOT NULL,
+    descripcion VARCHAR(200) NOT NULL,
+    CONSTRAINT pk_ruta PRIMARY KEY (id),
+    CONSTRAINT uq_ruta UNIQUE (ruta)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE usuario (
+    email VARCHAR(100) NOT NULL,
+    contrasena VARCHAR(200) NOT NULL,
+    CONSTRAINT pk_usuario PRIMARY KEY (email)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ================================================================
+-- TABLAS DEPENDIENTES (con foreign keys)
+-- ================================================================
 CREATE TABLE cliente (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    credito DECIMAL(14,2) NOT NULL DEFAULT 0 CHECK (credito >= 0),
-    fkcodpersona VARCHAR(20) NOT NULL UNIQUE,
+    id INT AUTO_INCREMENT NOT NULL,
+    credito DECIMAL(18,2) NOT NULL DEFAULT 0,
+    fkcodpersona VARCHAR(10) NOT NULL,
     fkcodempresa VARCHAR(10),
-    FOREIGN KEY (fkcodpersona) REFERENCES persona (codigo),
-    FOREIGN KEY (fkcodempresa) REFERENCES empresa (codigo)
+    CONSTRAINT pk_cliente PRIMARY KEY (id),
+    CONSTRAINT fk_cliente_persona FOREIGN KEY (fkcodpersona) REFERENCES persona(codigo),
+    CONSTRAINT fk_cliente_empresa FOREIGN KEY (fkcodempresa) REFERENCES empresa(codigo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE vendedor (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    id INT AUTO_INCREMENT NOT NULL,
     carnet INT NOT NULL,
     direccion VARCHAR(100) NOT NULL,
-    fkcodpersona VARCHAR(20) NOT NULL UNIQUE,
-    FOREIGN KEY (fkcodpersona) REFERENCES persona (codigo)
+    fkcodpersona VARCHAR(10) NOT NULL,
+    CONSTRAINT pk_vendedor PRIMARY KEY (id),
+    CONSTRAINT fk_vendedor_persona FOREIGN KEY (fkcodpersona) REFERENCES persona(codigo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE factura (
+    numero INT AUTO_INCREMENT NOT NULL,
+    fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    total DECIMAL(18,2) NOT NULL DEFAULT 0,
+    fkidcliente INT NOT NULL,
+    fkidvendedor INT NOT NULL,
+    CONSTRAINT pk_factura PRIMARY KEY (numero),
+    CONSTRAINT fk_factura_cliente FOREIGN KEY (fkidcliente) REFERENCES cliente(id),
+    CONSTRAINT fk_factura_vendedor FOREIGN KEY (fkidvendedor) REFERENCES vendedor(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE productosporfactura (
+    fknumfactura INT NOT NULL,
+    fkcodproducto VARCHAR(10) NOT NULL,
+    cantidad INT NOT NULL,
+    subtotal DECIMAL(18,2) NOT NULL DEFAULT 0,
+    CONSTRAINT pk_productosporfactura PRIMARY KEY (fknumfactura, fkcodproducto),
+    CONSTRAINT fk_prodfact_factura FOREIGN KEY (fknumfactura) REFERENCES factura(numero) ON DELETE CASCADE,
+    CONSTRAINT fk_prodfact_producto FOREIGN KEY (fkcodproducto) REFERENCES producto(codigo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE rol_usuario (
     fkemail VARCHAR(100) NOT NULL,
     fkidrol INT NOT NULL,
-    PRIMARY KEY (fkemail, fkidrol),
-    FOREIGN KEY (fkemail) REFERENCES usuario (email) ON UPDATE CASCADE ON DELETE CASCADE,
-    FOREIGN KEY (fkidrol) REFERENCES rol (id)
+    CONSTRAINT pk_rol_usuario PRIMARY KEY (fkemail, fkidrol),
+    CONSTRAINT fk_rolusuario_usuario FOREIGN KEY (fkemail) REFERENCES usuario(email),
+    CONSTRAINT fk_rolusuario_rol FOREIGN KEY (fkidrol) REFERENCES rol(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE rutarol (
     fkidruta INT NOT NULL,
     fkidrol INT NOT NULL,
-    PRIMARY KEY (fkidruta, fkidrol),
-    FOREIGN KEY (fkidruta) REFERENCES ruta (id) ON DELETE CASCADE,
-    FOREIGN KEY (fkidrol) REFERENCES rol (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE producto (
-    codigo VARCHAR(30) PRIMARY KEY,
-    nombre VARCHAR(100) NOT NULL,
-    stock INT NOT NULL CHECK (stock >= 0),
-    valorunitario DECIMAL(14,2) NOT NULL CHECK (valorunitario >= 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE factura (
-    numero INT AUTO_INCREMENT PRIMARY KEY,
-    fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    total DECIMAL(14,2) NOT NULL DEFAULT 0 CHECK (total >= 0),
-    fkidcliente INT NOT NULL,
-    fkidvendedor INT NOT NULL,
-    FOREIGN KEY (fkidcliente) REFERENCES cliente (id),
-    FOREIGN KEY (fkidvendedor) REFERENCES vendedor (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE productosporfactura (
-    fknumfactura INT NOT NULL,
-    fkcodproducto VARCHAR(30) NOT NULL,
-    cantidad INT NOT NULL CHECK (cantidad > 0),
-    subtotal DECIMAL(14,2) NOT NULL DEFAULT 0 CHECK (subtotal >= 0),
-    PRIMARY KEY (fknumfactura, fkcodproducto),
-    FOREIGN KEY (fknumfactura) REFERENCES factura (numero) ON DELETE CASCADE,
-    FOREIGN KEY (fkcodproducto) REFERENCES producto (codigo)
+    CONSTRAINT pk_rutarol PRIMARY KEY (fkidruta, fkidrol),
+    CONSTRAINT fk_rutarol_ruta FOREIGN KEY (fkidruta) REFERENCES ruta(id) ON DELETE CASCADE,
+    CONSTRAINT fk_rutarol_rol FOREIGN KEY (fkidrol) REFERENCES rol(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ================================================================
--- TRIGGERS: Actualizar totales y stock automáticamente
+-- TRIGGERS: Actualizar totales de factura y stock de producto
+-- MariaDB no soporta expresiones en SIGNAL MESSAGE_TEXT,
+-- se usa variable local v_msg para construir el mensaje.
 -- ================================================================
 DELIMITER $$
 
--- Trigger BEFORE INSERT
-CREATE TRIGGER trigger_productosporfactura_before_insert
+-- Trigger BEFORE INSERT: calcular subtotal y validar/descontar stock
+CREATE TRIGGER trg_prodfact_before_insert
 BEFORE INSERT ON productosporfactura
 FOR EACH ROW
 BEGIN
-    DECLARE v_precio DECIMAL(14,2);
+    DECLARE v_precio DECIMAL(18,2);
+    DECLARE v_stock INT;
+    DECLARE v_msg VARCHAR(500);
 
-    -- Obtener el precio unitario del producto
-    SELECT valorunitario INTO v_precio FROM producto WHERE codigo = NEW.fkcodproducto;
+    SELECT valorunitario, stock INTO v_precio, v_stock
+    FROM producto WHERE codigo = NEW.fkcodproducto;
 
-    -- Calcular el subtotal
+    -- Validar stock suficiente
+    IF v_stock < NEW.cantidad THEN
+        SET v_msg = CONCAT('Stock insuficiente para producto ', NEW.fkcodproducto,
+            '. Stock disponible: ', v_stock, ', cantidad solicitada: ', NEW.cantidad);
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Calcular subtotal
     SET NEW.subtotal = NEW.cantidad * v_precio;
 
-    -- Actualizar el stock del producto (restar la cantidad vendida)
+    -- Descontar stock
     UPDATE producto SET stock = stock - NEW.cantidad WHERE codigo = NEW.fkcodproducto;
 END$$
 
--- Trigger AFTER INSERT
-CREATE TRIGGER trigger_productosporfactura_after_insert
+-- Trigger AFTER INSERT: recalcular total de la factura
+CREATE TRIGGER trg_prodfact_after_insert
 AFTER INSERT ON productosporfactura
 FOR EACH ROW
 BEGIN
-    -- Actualizar el total de la factura
     UPDATE factura
     SET total = (SELECT COALESCE(SUM(subtotal), 0) FROM productosporfactura WHERE fknumfactura = NEW.fknumfactura)
     WHERE numero = NEW.fknumfactura;
 END$$
 
--- Trigger BEFORE UPDATE
-CREATE TRIGGER trigger_productosporfactura_before_update
+-- Trigger BEFORE UPDATE: recalcular subtotal y ajustar stock
+CREATE TRIGGER trg_prodfact_before_update
 BEFORE UPDATE ON productosporfactura
 FOR EACH ROW
 BEGIN
-    DECLARE v_precio DECIMAL(14,2);
+    DECLARE v_precio DECIMAL(18,2);
+    DECLARE v_stock INT;
+    DECLARE v_msg VARCHAR(500);
 
-    -- Obtener el precio unitario del producto
     SELECT valorunitario INTO v_precio FROM producto WHERE codigo = NEW.fkcodproducto;
+    SELECT stock INTO v_stock FROM producto WHERE codigo = NEW.fkcodproducto;
 
-    -- Calcular el nuevo subtotal
+    -- Validar stock suficiente (considerando la devolucion del stock anterior)
+    IF v_stock + OLD.cantidad < NEW.cantidad THEN
+        SET v_msg = CONCAT('Stock insuficiente para producto ', NEW.fkcodproducto,
+            '. Stock disponible: ', v_stock + OLD.cantidad, ', cantidad solicitada: ', NEW.cantidad);
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Recalcular subtotal
     SET NEW.subtotal = NEW.cantidad * v_precio;
 
-    -- Ajustar el stock: devolver la cantidad anterior y restar la nueva
+    -- Ajustar stock: devolver old.cantidad y descontar new.cantidad
     UPDATE producto
     SET stock = stock + OLD.cantidad - NEW.cantidad
     WHERE codigo = NEW.fkcodproducto;
 END$$
 
--- Trigger AFTER UPDATE
-CREATE TRIGGER trigger_productosporfactura_after_update
+-- Trigger AFTER UPDATE: recalcular total de la factura
+CREATE TRIGGER trg_prodfact_after_update
 AFTER UPDATE ON productosporfactura
 FOR EACH ROW
 BEGIN
-    -- Actualizar el total de la factura
     UPDATE factura
     SET total = (SELECT COALESCE(SUM(subtotal), 0) FROM productosporfactura WHERE fknumfactura = NEW.fknumfactura)
     WHERE numero = NEW.fknumfactura;
 END$$
 
--- Trigger BEFORE DELETE
-CREATE TRIGGER trigger_productosporfactura_before_delete
+-- Trigger BEFORE DELETE: restaurar stock del producto
+CREATE TRIGGER trg_prodfact_before_delete
 BEFORE DELETE ON productosporfactura
 FOR EACH ROW
 BEGIN
-    -- Devolver el stock al producto
     UPDATE producto
     SET stock = stock + OLD.cantidad
     WHERE codigo = OLD.fkcodproducto;
 END$$
 
--- Trigger AFTER DELETE
-CREATE TRIGGER trigger_productosporfactura_after_delete
+-- Trigger AFTER DELETE: recalcular total de la factura
+CREATE TRIGGER trg_prodfact_after_delete
 AFTER DELETE ON productosporfactura
 FOR EACH ROW
 BEGIN
-    -- Actualizar el total de la factura
     UPDATE factura
     SET total = (SELECT COALESCE(SUM(subtotal), 0) FROM productosporfactura WHERE fknumfactura = OLD.fknumfactura)
     WHERE numero = OLD.fknumfactura;
@@ -228,201 +263,429 @@ END$$
 
 DELIMITER ;
 
--- ================================================================
--- STORED PROCEDURES: Facturas (maestro-detalle)
--- ================================================================
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS - FACTURAS Y PRODUCTOS POR FACTURA
+-- Los resultados se retornan via parámetro OUT tipo JSON
+-- ============================================================
 DELIMITER $$
 
-CREATE PROCEDURE crear_factura_con_detalle(
+-- ------------------------------------------------------------
+-- 1. SP INSERTAR FACTURA Y PRODUCTOSPORFACTURA
+-- Recibe: id cliente, id vendedor, y un JSON array de productos
+-- Retorna: JSON con la factura creada y sus productos
+-- Nota: El trigger se encarga de calcular subtotal, descontar
+--       stock y actualizar total factura.
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "sp_insertar_factura_y_productosporfactura",
+--     "p_fkidcliente": 1, "p_fkidvendedor": 1,
+--     "p_productos": "[{\"codigo\":\"PR001\",\"cantidad\":2},{\"codigo\":\"PR003\",\"cantidad\":3}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE sp_insertar_factura_y_productosporfactura(
     IN p_fkidcliente INT,
     IN p_fkidvendedor INT,
-    IN p_fecha TIMESTAMP,
-    IN p_detalles JSON,
-    IN p_minimo_detalle INT
+    IN p_productos JSON,
+    IN p_minimo_detalle INT,
+    OUT p_resultado JSON
 )
 BEGIN
     DECLARE v_numfactura INT;
     DECLARE v_index INT DEFAULT 0;
     DECLARE v_count INT;
-    DECLARE v_codproducto VARCHAR(30);
+    DECLARE v_codproducto VARCHAR(10);
     DECLARE v_cantidad INT;
     DECLARE v_minimo INT;
+    DECLARE v_factura_json TEXT;
+    DECLARE v_productos_json TEXT;
+    DECLARE v_msg VARCHAR(500);
 
-    -- COALESCE(NULLIF(p_minimo_detalle, 0), 1): la API envia 0 cuando no se pasa el parametro
     SET v_minimo = COALESCE(NULLIF(p_minimo_detalle, 0), 1);
 
-    -- Validar minimo de productos
-    IF p_detalles IS NULL OR JSON_LENGTH(p_detalles) < v_minimo THEN
-        SET @v_msg = CONCAT('La factura requiere minimo ', v_minimo, ' producto(s).');
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = @v_msg;
+    IF p_productos IS NULL OR JSON_LENGTH(p_productos) < v_minimo THEN
+        SET v_msg = CONCAT('La factura requiere minimo ', v_minimo, ' producto(s).');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
     END IF;
 
-    -- Insertar la factura
-    INSERT INTO factura (fkidcliente, fkidvendedor, fecha)
-    VALUES (p_fkidcliente, p_fkidvendedor, p_fecha);
+    -- Crear la factura con total 0 (el trigger actualiza el total)
+    INSERT INTO factura (fkidcliente, fkidvendedor, total)
+    VALUES (p_fkidcliente, p_fkidvendedor, 0);
 
-    -- Obtener el número de factura generado
     SET v_numfactura = LAST_INSERT_ID();
+    SET v_count = JSON_LENGTH(p_productos);
 
-    -- Obtener el número de elementos en el JSON
-    SET v_count = JSON_LENGTH(p_detalles);
-
-    -- Iterar sobre cada elemento del JSON
+    -- Recorrer cada producto del JSON e insertar detalle
+    -- El trigger calcula subtotal, descuenta stock y actualiza total
     WHILE v_index < v_count DO
-        SET v_codproducto = JSON_UNQUOTE(JSON_EXTRACT(p_detalles, CONCAT('$[', v_index, '].fkcodproducto')));
-        SET v_cantidad = JSON_EXTRACT(p_detalles, CONCAT('$[', v_index, '].cantidad'));
+        SET v_codproducto = JSON_UNQUOTE(JSON_EXTRACT(p_productos, CONCAT('$[', v_index, '].codigo')));
+        SET v_cantidad = JSON_EXTRACT(p_productos, CONCAT('$[', v_index, '].cantidad'));
 
-        -- Insertar el detalle de la factura
-        INSERT INTO productosporfactura (fknumfactura, fkcodproducto, cantidad)
-        VALUES (v_numfactura, v_codproducto, v_cantidad);
+        INSERT INTO productosporfactura (fknumfactura, fkcodproducto, cantidad, subtotal)
+        VALUES (v_numfactura, v_codproducto, v_cantidad, 0);
 
         SET v_index = v_index + 1;
     END WHILE;
+
+    -- Retornar resultado como JSON
+    SELECT CONCAT(
+        '{"numero":', f.numero,
+        ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%dT%H:%i:%s'), '"',
+        ',"total":', f.total,
+        ',"fkidcliente":', f.fkidcliente,
+        ',"fkidvendedor":', f.fkidvendedor, '}'
+    ) INTO v_factura_json
+    FROM factura f WHERE f.numero = v_numfactura;
+
+    SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
+        JSON_OBJECT(
+            'codigo_producto', pf.fkcodproducto,
+            'nombre_producto', pr.nombre,
+            'cantidad', pf.cantidad,
+            'valorunitario', pr.valorunitario,
+            'subtotal', pf.subtotal
+        )
+    ), ''), ']')
+    INTO v_productos_json
+    FROM productosporfactura pf
+    JOIN producto pr ON pr.codigo = pf.fkcodproducto
+    WHERE pf.fknumfactura = v_numfactura;
+
+    SET p_resultado = CONCAT('{"factura":', v_factura_json, ',"productos":', COALESCE(v_productos_json, '[]'), '}');
 END$$
 
-CREATE PROCEDURE actualizar_factura_con_detalle(
-    IN p_numfactura INT,
-    IN p_fkidcliente INT,
-    IN p_fkidvendedor INT,
-    IN p_fecha TIMESTAMP,
-    IN p_detalles JSON,
-    IN p_minimo_detalle INT
-)
-BEGIN
-    DECLARE v_index INT DEFAULT 0;
-    DECLARE v_count INT;
-    DECLARE v_codproducto VARCHAR(30);
-    DECLARE v_cantidad INT;
-    DECLARE v_minimo INT;
-
-    -- COALESCE(NULLIF(p_minimo_detalle, 0), 1): la API envia 0 cuando no se pasa el parametro
-    SET v_minimo = COALESCE(NULLIF(p_minimo_detalle, 0), 1);
-
-    -- Validar minimo de productos
-    IF p_detalles IS NULL OR JSON_LENGTH(p_detalles) < v_minimo THEN
-        SET @v_msg = CONCAT('La factura requiere minimo ', v_minimo, ' producto(s).');
-        SIGNAL SQLSTATE '45000'
-            SET MESSAGE_TEXT = @v_msg;
-    END IF;
-
-    -- Actualizar la cabecera de la factura
-    UPDATE factura
-    SET fkidcliente = p_fkidcliente,
-        fkidvendedor = p_fkidvendedor,
-        fecha = p_fecha
-    WHERE numero = p_numfactura;
-
-    -- Eliminar los detalles anteriores (esto restaura el stock automáticamente por el trigger)
-    DELETE FROM productosporfactura WHERE fknumfactura = p_numfactura;
-
-    -- Obtener el número de elementos en el JSON
-    SET v_count = JSON_LENGTH(p_detalles);
-
-    -- Insertar los nuevos detalles
-    WHILE v_index < v_count DO
-        SET v_codproducto = JSON_UNQUOTE(JSON_EXTRACT(p_detalles, CONCAT('$[', v_index, '].fkcodproducto')));
-        SET v_cantidad = JSON_EXTRACT(p_detalles, CONCAT('$[', v_index, '].cantidad'));
-
-        INSERT INTO productosporfactura (fknumfactura, fkcodproducto, cantidad)
-        VALUES (p_numfactura, v_codproducto, v_cantidad);
-
-        SET v_index = v_index + 1;
-    END WHILE;
-END$$
-
-CREATE PROCEDURE eliminar_factura_con_detalle(
-    IN p_numfactura INT
-)
-BEGIN
-    -- Eliminar la factura (los detalles se eliminan automáticamente por ON DELETE CASCADE)
-    -- El trigger restaura el stock automáticamente
-    DELETE FROM factura WHERE numero = p_numfactura;
-END$$
-
--- CORREGIDO para MariaDB 10.4: sin JSON_ARRAYAGG ni CAST AS JSON
--- Se construye el JSON completo con CONCAT + GROUP_CONCAT
-CREATE PROCEDURE consultar_factura_con_detalle(
-    IN p_numfactura INT,
+-- ------------------------------------------------------------
+-- 2. SP CONSULTAR FACTURA Y PRODUCTOSPORFACTURA
+-- Consulta una factura por número con detalle de productos,
+-- nombre del cliente y nombre del vendedor
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "sp_consultar_factura_y_productosporfactura",
+--     "p_numero": 1, "p_resultado": "" }
+-- ------------------------------------------------------------
+CREATE PROCEDURE sp_consultar_factura_y_productosporfactura(
+    IN p_numero INT,
     OUT p_resultado JSON
 )
 BEGIN
     DECLARE v_detalle_json TEXT;
+    DECLARE v_msg VARCHAR(500);
 
-    -- Construir el array JSON del detalle usando GROUP_CONCAT
+    IF NOT EXISTS (SELECT 1 FROM factura WHERE numero = p_numero) THEN
+        SET v_msg = CONCAT('Factura ', p_numero, ' no existe');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
     SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
         JSON_OBJECT(
-            'fkcodproducto', d.fkcodproducto,
+            'codigo_producto', d.fkcodproducto,
+            'nombre_producto', p.nombre,
             'cantidad', d.cantidad,
-            'subtotal', d.subtotal,
-            'valorunitario', p.valorunitario
+            'valorunitario', p.valorunitario,
+            'subtotal', d.subtotal
         )
     ), ''), ']')
     INTO v_detalle_json
     FROM productosporfactura d
     INNER JOIN producto p ON p.codigo = d.fkcodproducto
-    WHERE d.fknumfactura = p_numfactura;
+    WHERE d.fknumfactura = p_numero;
 
-    -- Construir el resultado completo con CONCAT para anidar el JSON sin CAST
     SELECT CONCAT(
-        '{"numero":', f.numero,
-        ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%d %H:%i:%s'), '"',
+        '{"factura":{"numero":', f.numero,
+        ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%dT%H:%i:%s'), '"',
         ',"total":', f.total,
-        ',"cliente":"', c.fkcodpersona, '"',
-        ',"vendedor":"', v.fkcodpersona, '"',
-        ',"detalle":', COALESCE(v_detalle_json, '[]'),
+        ',"fkidcliente":', f.fkidcliente,
+        ',"nombre_cliente":"', pc.nombre, '"',
+        ',"fkidvendedor":', f.fkidvendedor,
+        ',"nombre_vendedor":"', pv.nombre, '"',
+        '},"productos":', COALESCE(v_detalle_json, '[]'),
         '}'
     ) INTO p_resultado
     FROM factura f
     JOIN cliente c ON c.id = f.fkidcliente
+    JOIN persona pc ON pc.codigo = c.fkcodpersona
     JOIN vendedor v ON v.id = f.fkidvendedor
-    WHERE f.numero = p_numfactura;
+    JOIN persona pv ON pv.codigo = v.fkcodpersona
+    WHERE f.numero = p_numero;
 END$$
 
--- ================================================================
--- STORED PROCEDURES: Usuarios con Roles
--- NOTA: El cifrado lo hace la API C# con el parámetro camposEncriptar
--- ================================================================
+-- ------------------------------------------------------------
+-- 3. SP LISTAR FACTURAS Y PRODUCTOSPORFACTURA
+-- Lista todas las facturas con sus productos, cliente y vendedor
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "sp_listar_facturas_y_productosporfactura",
+--     "p_resultado": "" }
+-- ------------------------------------------------------------
+CREATE PROCEDURE sp_listar_facturas_y_productosporfactura(
+    OUT p_resultado JSON
+)
+BEGIN
+    DECLARE v_result TEXT DEFAULT '';
+    DECLARE v_factura TEXT;
+    DECLARE v_detalle TEXT;
+    DECLARE v_done INT DEFAULT FALSE;
+    DECLARE v_numero INT;
+    DECLARE cur CURSOR FOR SELECT numero FROM factura ORDER BY numero;
+    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = TRUE;
 
--- CORREGIDO: Formato unificado, espera [{"fkidrol":1}, {"fkidrol":2}]
--- (consistente con actualizar_usuario_con_roles y con los CALL de datos iniciales)
-CREATE PROCEDURE crear_usuario_con_roles(
-    IN p_email VARCHAR(100),
-    IN p_contrasena VARCHAR(100),
-    IN p_roles_json JSON
+    OPEN cur;
+    read_loop: LOOP
+        FETCH cur INTO v_numero;
+        IF v_done THEN LEAVE read_loop; END IF;
+
+        SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
+            JSON_OBJECT(
+                'codigo_producto', d.fkcodproducto,
+                'nombre_producto', p.nombre,
+                'cantidad', d.cantidad,
+                'valorunitario', p.valorunitario,
+                'subtotal', d.subtotal
+            )
+        ), ''), ']')
+        INTO v_detalle
+        FROM productosporfactura d
+        INNER JOIN producto p ON p.codigo = d.fkcodproducto
+        WHERE d.fknumfactura = v_numero;
+
+        SELECT CONCAT(
+            '{"numero":', f.numero,
+            ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%dT%H:%i:%s'), '"',
+            ',"total":', f.total,
+            ',"fkidcliente":', f.fkidcliente,
+            ',"nombre_cliente":"', pc.nombre, '"',
+            ',"fkidvendedor":', f.fkidvendedor,
+            ',"nombre_vendedor":"', pv.nombre, '"',
+            ',"productos":', COALESCE(v_detalle, '[]'),
+            '}'
+        )
+        INTO v_factura
+        FROM factura f
+        JOIN cliente c ON c.id = f.fkidcliente
+        JOIN persona pc ON pc.codigo = c.fkcodpersona
+        JOIN vendedor v ON v.id = f.fkidvendedor
+        JOIN persona pv ON pv.codigo = v.fkcodpersona
+        WHERE f.numero = v_numero;
+
+        IF v_result != '' THEN SET v_result = CONCAT(v_result, ','); END IF;
+        SET v_result = CONCAT(v_result, v_factura);
+    END LOOP;
+    CLOSE cur;
+
+    IF v_result = '' THEN
+        SET p_resultado = '[]';
+    ELSE
+        SET p_resultado = CONCAT('[', v_result, ']');
+    END IF;
+END$$
+
+-- ------------------------------------------------------------
+-- 4. SP ACTUALIZAR FACTURA Y PRODUCTOSPORFACTURA
+-- Reemplaza los productos de una factura existente.
+-- Nota: El trigger se encarga de restaurar stock (DELETE),
+--       descontar stock (INSERT) y recalcular subtotales/total.
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "sp_actualizar_factura_y_productosporfactura",
+--     "p_numero": 1, "p_fkidcliente": 2, "p_fkidvendedor": 1,
+--     "p_productos": "[{\"codigo\":\"PR002\",\"cantidad\":1},{\"codigo\":\"PR004\",\"cantidad\":5}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE sp_actualizar_factura_y_productosporfactura(
+    IN p_numero INT,
+    IN p_fkidcliente INT,
+    IN p_fkidvendedor INT,
+    IN p_productos JSON,
+    IN p_minimo_detalle INT,
+    OUT p_resultado JSON
 )
 BEGIN
     DECLARE v_index INT DEFAULT 0;
     DECLARE v_count INT;
-    DECLARE v_idrol INT;
+    DECLARE v_codproducto VARCHAR(10);
+    DECLARE v_cantidad INT;
+    DECLARE v_minimo INT;
+    DECLARE v_factura_json TEXT;
+    DECLARE v_productos_json TEXT;
+    DECLARE v_msg VARCHAR(500);
 
-    -- Insertar el usuario
-    INSERT INTO usuario (email, contrasena)
-    VALUES (p_email, p_contrasena);
+    IF NOT EXISTS (SELECT 1 FROM factura WHERE numero = p_numero) THEN
+        SET v_msg = CONCAT('Factura ', p_numero, ' no existe');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
 
-    -- Obtener el número de roles en el array JSON
-    SET v_count = JSON_LENGTH(p_roles_json);
+    SET v_minimo = COALESCE(NULLIF(p_minimo_detalle, 0), 1);
 
-    -- Insertar los roles del usuario (formato: [{"fkidrol":1}, {"fkidrol":2}])
+    IF p_productos IS NULL OR JSON_LENGTH(p_productos) < v_minimo THEN
+        SET v_msg = CONCAT('La factura requiere minimo ', v_minimo, ' producto(s).');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Eliminar detalle anterior (el trigger restaura stock y recalcula total)
+    DELETE FROM productosporfactura WHERE fknumfactura = p_numero;
+
+    -- Insertar nuevos productos (el trigger calcula subtotal, descuenta stock, actualiza total)
+    SET v_count = JSON_LENGTH(p_productos);
+
     WHILE v_index < v_count DO
-        SET v_idrol = JSON_EXTRACT(p_roles_json, CONCAT('$[', v_index, '].fkidrol'));
+        SET v_codproducto = JSON_UNQUOTE(JSON_EXTRACT(p_productos, CONCAT('$[', v_index, '].codigo')));
+        SET v_cantidad = JSON_EXTRACT(p_productos, CONCAT('$[', v_index, '].cantidad'));
 
-        INSERT INTO rol_usuario (fkemail, fkidrol)
-        VALUES (p_email, v_idrol);
+        INSERT INTO productosporfactura (fknumfactura, fkcodproducto, cantidad, subtotal)
+        VALUES (p_numero, v_codproducto, v_cantidad, 0);
 
         SET v_index = v_index + 1;
     END WHILE;
+
+    -- Actualizar cliente y vendedor de la factura
+    UPDATE factura
+    SET fkidcliente = p_fkidcliente,
+        fkidvendedor = p_fkidvendedor
+    WHERE numero = p_numero;
+
+    -- Retornar resultado como JSON
+    SELECT CONCAT(
+        '{"numero":', f.numero,
+        ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%dT%H:%i:%s'), '"',
+        ',"total":', f.total,
+        ',"fkidcliente":', f.fkidcliente,
+        ',"fkidvendedor":', f.fkidvendedor, '}'
+    ) INTO v_factura_json
+    FROM factura f WHERE f.numero = p_numero;
+
+    SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
+        JSON_OBJECT(
+            'codigo_producto', pf.fkcodproducto,
+            'nombre_producto', pr.nombre,
+            'cantidad', pf.cantidad,
+            'valorunitario', pr.valorunitario,
+            'subtotal', pf.subtotal
+        )
+    ), ''), ']')
+    INTO v_productos_json
+    FROM productosporfactura pf
+    JOIN producto pr ON pr.codigo = pf.fkcodproducto
+    WHERE pf.fknumfactura = p_numero;
+
+    SET p_resultado = CONCAT('{"factura":', v_factura_json, ',"productos":', COALESCE(v_productos_json, '[]'), '}');
 END$$
 
-CREATE PROCEDURE actualizar_usuario_con_roles(
+-- ------------------------------------------------------------
+-- 5. SP BORRAR FACTURA Y PRODUCTOSPORFACTURA
+-- ON DELETE CASCADE elimina productosporfactura automáticamente.
+-- El trigger restaura stock al borrar cada producto de la factura.
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "sp_borrar_factura_y_productosporfactura",
+--     "p_numero": 1, "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE sp_borrar_factura_y_productosporfactura(
+    IN p_numero INT,
+    OUT p_resultado JSON
+)
+BEGIN
+    DECLARE v_total DECIMAL(18,2);
+    DECLARE v_cantidad_productos INT;
+    DECLARE v_msg VARCHAR(500);
+
+    IF NOT EXISTS (SELECT 1 FROM factura WHERE numero = p_numero) THEN
+        SET v_msg = CONCAT('Factura ', p_numero, ' no existe');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Guardar info antes de borrar para el JSON de respuesta
+    SELECT COUNT(*) INTO v_cantidad_productos
+    FROM productosporfactura WHERE fknumfactura = p_numero;
+
+    SELECT total INTO v_total FROM factura WHERE numero = p_numero;
+
+    -- Borrar factura (ON DELETE CASCADE borra productosporfactura,
+    -- y el trigger restaura stock por cada producto eliminado)
+    DELETE FROM factura WHERE numero = p_numero;
+
+    -- Retornar resultado como JSON
+    SET p_resultado = JSON_OBJECT(
+        'mensaje', 'Factura eliminada exitosamente',
+        'numero_eliminado', p_numero,
+        'total_eliminado', v_total,
+        'productos_eliminados', v_cantidad_productos
+    );
+END$$
+
+DELIMITER ;
+
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS - USUARIOS CON ROLES
+-- Nota: El cifrado lo hace la API C# con el parámetro camposEncriptar
+-- ============================================================
+DELIMITER $$
+
+-- ------------------------------------------------------------
+-- 6. SP CREAR USUARIO CON ROLES
+-- Recibe: email, contraseña y JSON array de roles [{"fkidrol":1},...]
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "crear_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_contrasena": "pass123",
+--     "p_roles_json": "[{\"fkidrol\":1},{\"fkidrol\":2}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE crear_usuario_con_roles(
     IN p_email VARCHAR(100),
-    IN p_contrasena VARCHAR(100),
-    IN p_roles JSON
+    IN p_contrasena VARCHAR(200),
+    IN p_roles_json JSON,
+    OUT p_resultado JSON
 )
 BEGIN
     DECLARE v_index INT DEFAULT 0;
     DECLARE v_count INT;
     DECLARE v_idrol INT;
+    DECLARE v_roles_json TEXT;
+
+    -- Insertar el usuario
+    INSERT INTO usuario (email, contrasena) VALUES (p_email, p_contrasena);
+
+    -- Insertar los roles del usuario
+    SET v_count = JSON_LENGTH(p_roles_json);
+
+    WHILE v_index < v_count DO
+        SET v_idrol = JSON_EXTRACT(p_roles_json, CONCAT('$[', v_index, '].fkidrol'));
+        INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (p_email, v_idrol);
+        SET v_index = v_index + 1;
+    END WHILE;
+
+    -- Retornar resultado como JSON
+    SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
+        JSON_OBJECT('idrol', r.id, 'nombre', r.nombre)
+    ), ''), ']')
+    INTO v_roles_json
+    FROM rol_usuario ru
+    JOIN rol r ON r.id = ru.fkidrol
+    WHERE ru.fkemail = p_email;
+
+    SET p_resultado = CONCAT('{"email":"', p_email, '","roles":', COALESCE(v_roles_json, '[]'), '}');
+END$$
+
+-- ------------------------------------------------------------
+-- 7. SP ACTUALIZAR USUARIO CON ROLES
+-- Actualiza contraseña (si no está vacía) y reemplaza roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "actualizar_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_contrasena": "newpass",
+--     "p_roles": "[{\"fkidrol\":1},{\"fkidrol\":3}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE actualizar_usuario_con_roles(
+    IN p_email VARCHAR(100),
+    IN p_contrasena VARCHAR(200),
+    IN p_roles JSON,
+    OUT p_resultado JSON
+)
+BEGIN
+    DECLARE v_index INT DEFAULT 0;
+    DECLARE v_count INT;
+    DECLARE v_idrol INT;
+    DECLARE v_roles_json TEXT;
 
     -- Actualizar la contraseña solo si no está vacía
     IF p_contrasena IS NOT NULL AND p_contrasena != '' THEN
@@ -432,64 +695,16 @@ BEGIN
     -- Eliminar los roles anteriores
     DELETE FROM rol_usuario WHERE fkemail = p_email;
 
-    -- Obtener el número de roles
+    -- Insertar los nuevos roles
     SET v_count = JSON_LENGTH(p_roles);
 
-    -- Insertar los nuevos roles (formato: [{"fkidrol":1}, {"fkidrol":2}])
     WHILE v_index < v_count DO
         SET v_idrol = JSON_EXTRACT(p_roles, CONCAT('$[', v_index, '].fkidrol'));
-
-        INSERT INTO rol_usuario (fkemail, fkidrol)
-        VALUES (p_email, v_idrol);
-
+        INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (p_email, v_idrol);
         SET v_index = v_index + 1;
     END WHILE;
-END$$
 
-CREATE PROCEDURE eliminar_usuario_con_roles(
-    IN p_email VARCHAR(100)
-)
-BEGIN
-    -- Eliminar el usuario (los roles se eliminan automáticamente por ON DELETE CASCADE)
-    DELETE FROM usuario WHERE email = p_email;
-END$$
-
--- CORREGIDO: Formato unificado con los demás procedures de usuario
-CREATE PROCEDURE actualizar_roles_usuario(
-    IN p_email VARCHAR(100),
-    IN p_roles_json JSON
-)
-BEGIN
-    DECLARE v_index INT DEFAULT 0;
-    DECLARE v_count INT;
-    DECLARE v_idrol INT;
-
-    -- Eliminar los roles anteriores
-    DELETE FROM rol_usuario WHERE fkemail = p_email;
-
-    -- Obtener el número de roles en el array JSON
-    SET v_count = JSON_LENGTH(p_roles_json);
-
-    -- Insertar los nuevos roles (formato: [{"fkidrol":1}, {"fkidrol":2}])
-    WHILE v_index < v_count DO
-        SET v_idrol = JSON_EXTRACT(p_roles_json, CONCAT('$[', v_index, '].fkidrol'));
-
-        INSERT INTO rol_usuario (fkemail, fkidrol)
-        VALUES (p_email, v_idrol);
-
-        SET v_index = v_index + 1;
-    END WHILE;
-END$$
-
--- CORREGIDO para MariaDB 10.4: sin JSON_ARRAYAGG ni CAST AS JSON
-CREATE PROCEDURE consultar_usuario_con_roles(
-    IN p_email VARCHAR(100),
-    OUT p_resultado JSON
-)
-BEGIN
-    DECLARE v_roles_json TEXT;
-
-    -- Construir el array JSON de roles usando GROUP_CONCAT
+    -- Retornar resultado como JSON
     SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
         JSON_OBJECT('idrol', r.id, 'nombre', r.nombre)
     ), ''), ']')
@@ -498,22 +713,135 @@ BEGIN
     JOIN rol r ON r.id = ru.fkidrol
     WHERE ru.fkemail = p_email;
 
-    -- Construir el resultado completo con CONCAT para anidar el array sin CAST
-    SET p_resultado = CONCAT(
-        '{"email":"', p_email, '"',
-        ',"roles":', COALESCE(v_roles_json, '[]'),
-        '}'
+    SET p_resultado = CONCAT('{"email":"', p_email, '","roles":', COALESCE(v_roles_json, '[]'), '}');
+END$$
+
+-- ------------------------------------------------------------
+-- 8. SP ELIMINAR USUARIO CON ROLES
+-- Elimina el usuario y sus roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "eliminar_usuario_con_roles",
+--     "p_email": "user@correo.com", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE eliminar_usuario_con_roles(
+    IN p_email VARCHAR(100),
+    OUT p_resultado JSON
+)
+BEGIN
+    DECLARE v_msg VARCHAR(500);
+
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = p_email) THEN
+        SET v_msg = CONCAT('Usuario ', p_email, ' no existe');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Eliminar roles del usuario primero (FK sin CASCADE)
+    DELETE FROM rol_usuario WHERE fkemail = p_email;
+    DELETE FROM usuario WHERE email = p_email;
+
+    SET p_resultado = JSON_OBJECT(
+        'mensaje', 'Usuario eliminado exitosamente',
+        'email_eliminado', p_email
     );
 END$$
 
--- CORREGIDO para MariaDB 10.4: sin JSON_ARRAYAGG ni CAST AS JSON
+-- ------------------------------------------------------------
+-- 9. SP ACTUALIZAR ROLES DE USUARIO
+-- Solo reemplaza los roles sin tocar la contraseña
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "actualizar_roles_usuario",
+--     "p_email": "user@correo.com",
+--     "p_roles_json": "[{\"fkidrol\":1},{\"fkidrol\":2}]",
+--     "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE actualizar_roles_usuario(
+    IN p_email VARCHAR(100),
+    IN p_roles_json JSON,
+    OUT p_resultado JSON
+)
+BEGIN
+    DECLARE v_index INT DEFAULT 0;
+    DECLARE v_count INT;
+    DECLARE v_idrol INT;
+    DECLARE v_roles_json_result TEXT;
+    DECLARE v_msg VARCHAR(500);
+
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = p_email) THEN
+        SET v_msg = CONCAT('Usuario ', p_email, ' no existe');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Eliminar los roles anteriores
+    DELETE FROM rol_usuario WHERE fkemail = p_email;
+
+    -- Insertar los nuevos roles
+    SET v_count = JSON_LENGTH(p_roles_json);
+
+    WHILE v_index < v_count DO
+        SET v_idrol = JSON_EXTRACT(p_roles_json, CONCAT('$[', v_index, '].fkidrol'));
+        INSERT INTO rol_usuario (fkemail, fkidrol) VALUES (p_email, v_idrol);
+        SET v_index = v_index + 1;
+    END WHILE;
+
+    -- Retornar resultado como JSON
+    SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
+        JSON_OBJECT('idrol', r.id, 'nombre', r.nombre)
+    ), ''), ']')
+    INTO v_roles_json_result
+    FROM rol_usuario ru
+    JOIN rol r ON r.id = ru.fkidrol
+    WHERE ru.fkemail = p_email;
+
+    SET p_resultado = CONCAT('{"email":"', p_email, '","roles":', COALESCE(v_roles_json_result, '[]'), '}');
+END$$
+
+-- ------------------------------------------------------------
+-- 10. SP CONSULTAR USUARIO CON ROLES
+-- Retorna JSON con email y array de roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "consultar_usuario_con_roles",
+--     "p_email": "admin@correo.com", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE consultar_usuario_con_roles(
+    IN p_email VARCHAR(100),
+    OUT p_resultado JSON
+)
+BEGIN
+    DECLARE v_roles_json TEXT;
+    DECLARE v_msg VARCHAR(500);
+
+    IF NOT EXISTS (SELECT 1 FROM usuario WHERE email = p_email) THEN
+        SET v_msg = CONCAT('Usuario ', p_email, ' no existe');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
+        JSON_OBJECT('idrol', r.id, 'nombre', r.nombre)
+    ), ''), ']')
+    INTO v_roles_json
+    FROM rol_usuario ru
+    JOIN rol r ON r.id = ru.fkidrol
+    WHERE ru.fkemail = p_email;
+
+    SET p_resultado = CONCAT('{"email":"', p_email, '","roles":', COALESCE(v_roles_json, '[]'), '}');
+END$$
+
+-- ------------------------------------------------------------
+-- 11. SP LISTAR USUARIOS CON ROLES
+-- Retorna JSON array con todos los usuarios y sus roles
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "listar_usuarios_con_roles", "p_resultado": null }
+-- ------------------------------------------------------------
 CREATE PROCEDURE listar_usuarios_con_roles(
     OUT p_resultado JSON
 )
 BEGIN
     DECLARE v_resultado TEXT;
 
-    -- Construir el array de usuarios con sus roles usando CONCAT
     SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
         CONCAT(
             '{"email":"', sub.email, '"',
@@ -532,14 +860,28 @@ BEGIN
             WHERE ru.fkemail = u.email
             ) AS roles_json
         FROM usuario u
+        ORDER BY u.email
     ) AS sub;
 
     SET p_resultado = COALESCE(v_resultado, '[]');
 END$$
 
--- ================================================================
--- STORED PROCEDURES: Permisos (RBAC)
--- ================================================================
+DELIMITER ;
+
+-- ============================================================
+-- PROCEDIMIENTOS ALMACENADOS - PERMISOS (RBAC)
+-- ============================================================
+DELIMITER $$
+
+-- ------------------------------------------------------------
+-- 12. SP VERIFICAR ACCESO A RUTA
+-- Verifica si un usuario tiene permiso para acceder a una ruta
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "verificar_acceso_ruta",
+--     "p_email": "admin@correo.com", "p_fkidruta": 2,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
 CREATE PROCEDURE verificar_acceso_ruta(
     IN p_email VARCHAR(100),
     IN p_fkidruta INT,
@@ -548,7 +890,6 @@ CREATE PROCEDURE verificar_acceso_ruta(
 BEGIN
     DECLARE v_tiene_acceso BOOLEAN DEFAULT FALSE;
 
-    -- Verificar si el usuario tiene acceso a la ruta
     SELECT EXISTS(
         SELECT 1
         FROM usuario u
@@ -557,7 +898,6 @@ BEGIN
         WHERE u.email = p_email AND rr.fkidruta = p_fkidruta
     ) INTO v_tiene_acceso;
 
-    -- Construir el resultado JSON
     SET p_resultado = JSON_OBJECT(
         'tiene_acceso', v_tiene_acceso,
         'email', p_email,
@@ -565,85 +905,111 @@ BEGIN
     );
 END$$
 
-CREATE PROCEDURE listar_rutarol()
+-- ------------------------------------------------------------
+-- 13. SP LISTAR RUTAROL
+-- Lista todos los permisos ruta-rol con nombres
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "listar_rutarol", "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE listar_rutarol(
+    OUT p_resultado JSON
+)
 BEGIN
-    SELECT rr.fkidruta, rt.ruta, rr.fkidrol, r.nombre AS rol
+    DECLARE v_resultado TEXT;
+
+    SELECT CONCAT('[', COALESCE(GROUP_CONCAT(
+        JSON_OBJECT(
+            'fkidruta', rr.fkidruta,
+            'ruta', rt.ruta,
+            'fkidrol', rr.fkidrol,
+            'rol', r.nombre
+        )
+        ORDER BY rt.ruta, r.nombre
+    ), ''), ']')
+    INTO v_resultado
     FROM rutarol rr
     JOIN ruta rt ON rt.id = rr.fkidruta
-    JOIN rol r ON r.id = rr.fkidrol
-    ORDER BY rt.ruta, r.nombre;
+    JOIN rol r ON r.id = rr.fkidrol;
+
+    SET p_resultado = COALESCE(v_resultado, '[]');
 END$$
 
+-- ------------------------------------------------------------
+-- 14. SP CREAR RUTAROL
+-- Asigna un rol a una ruta por IDs
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "crear_rutarol",
+--     "p_fkidruta": 8, "p_fkidrol": 3,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
 CREATE PROCEDURE crear_rutarol(
     IN p_fkidruta INT,
     IN p_fkidrol INT,
     OUT p_resultado JSON
 )
-BEGIN
-    DECLARE v_existe_ruta INT;
-    DECLARE v_existe_rol INT;
-    DECLARE v_existe_permiso INT;
-
+proc_body: BEGIN
     -- Verificar si la ruta existe
-    SELECT COUNT(*) INTO v_existe_ruta FROM ruta WHERE id = p_fkidruta;
-
-    IF v_existe_ruta = 0 THEN
+    IF NOT EXISTS (SELECT 1 FROM ruta WHERE id = p_fkidruta) THEN
         SET p_resultado = JSON_OBJECT('success', false, 'message', 'La ruta especificada no existe');
-    ELSE
-        -- Verificar si el rol existe
-        SELECT COUNT(*) INTO v_existe_rol FROM rol WHERE id = p_fkidrol;
-
-        IF v_existe_rol = 0 THEN
-            SET p_resultado = JSON_OBJECT('success', false, 'message', 'El rol especificado no existe');
-        ELSE
-            -- Verificar si el permiso ya existe
-            SELECT COUNT(*) INTO v_existe_permiso FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
-
-            IF v_existe_permiso > 0 THEN
-                SET p_resultado = JSON_OBJECT('success', false, 'message', 'El permiso ya existe');
-            ELSE
-                INSERT INTO rutarol (fkidruta, fkidrol) VALUES (p_fkidruta, p_fkidrol);
-                SET p_resultado = JSON_OBJECT('success', true, 'message', 'Permiso creado exitosamente');
-            END IF;
-        END IF;
+        LEAVE proc_body;
     END IF;
+
+    -- Verificar si el rol existe
+    IF NOT EXISTS (SELECT 1 FROM rol WHERE id = p_fkidrol) THEN
+        SET p_resultado = JSON_OBJECT('success', false, 'message', 'El rol especificado no existe');
+        LEAVE proc_body;
+    END IF;
+
+    -- Verificar si el permiso ya existe
+    IF EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol) THEN
+        SET p_resultado = JSON_OBJECT('success', false, 'message', 'El permiso ya existe');
+        LEAVE proc_body;
+    END IF;
+
+    INSERT INTO rutarol (fkidruta, fkidrol) VALUES (p_fkidruta, p_fkidrol);
+    SET p_resultado = JSON_OBJECT('success', true, 'message', 'Permiso creado exitosamente');
 END$$
 
+-- ------------------------------------------------------------
+-- 15. SP ELIMINAR RUTAROL
+-- Quita un permiso ruta-rol por IDs
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "eliminar_rutarol",
+--     "p_fkidruta": 8, "p_fkidrol": 3,
+--     "p_resultado": null }
+-- ------------------------------------------------------------
 CREATE PROCEDURE eliminar_rutarol(
     IN p_fkidruta INT,
     IN p_fkidrol INT,
     OUT p_resultado JSON
 )
-BEGIN
-    DECLARE v_existe_permiso INT;
-
+proc_body: BEGIN
     -- Verificar si el permiso existe
-    SELECT COUNT(*) INTO v_existe_permiso FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
-
-    IF v_existe_permiso = 0 THEN
+    IF NOT EXISTS (SELECT 1 FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol) THEN
         SET p_resultado = JSON_OBJECT('success', false, 'message', 'El permiso no existe');
-    ELSE
-        DELETE FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
-        SET p_resultado = JSON_OBJECT('success', true, 'message', 'Permiso eliminado exitosamente');
+        LEAVE proc_body;
     END IF;
+
+    DELETE FROM rutarol WHERE fkidruta = p_fkidruta AND fkidrol = p_fkidrol;
+    SET p_resultado = JSON_OBJECT('success', true, 'message', 'Permiso eliminado exitosamente');
 END$$
 
 DELIMITER ;
 
--- ================================================================
--- DATOS INICIALES
--- ================================================================
-INSERT INTO rol (nombre) VALUES
-('Administrador'),
-('Vendedor'),
-('Cajero'),
-('Contador'),
-('Cliente');
+-- ============================================================
+-- DATOS (identicos a SQL Server y PostgreSQL)
+-- ============================================================
 
+-- Empresas
 INSERT INTO empresa (codigo, nombre) VALUES
 ('E001', 'Comercial Los Andes S.A.'),
-('E002', 'Distribuciones El Centro S.A.');
+('E002', 'Distribuciones El Centro S.A.'),
+('E999', 'Empresa Test');
 
+-- Personas
 INSERT INTO persona (codigo, nombre, email, telefono) VALUES
 ('P001', 'Ana Torres', 'ana.torres@correo.com', '3011111111'),
 ('P002', 'Carlos Pérez', 'carlos.perez@correo.com', '3022222222'),
@@ -652,40 +1018,26 @@ INSERT INTO persona (codigo, nombre, email, telefono) VALUES
 ('P005', 'Laura Rojas', 'laura.rojas@correo.com', '3055555555'),
 ('P006', 'Pedro Castillo', 'pedro.castillo@correo.com', '3066666666');
 
-INSERT INTO cliente (credito, fkcodpersona, fkcodempresa) VALUES
-(500000, 'P001', 'E001'),
-(250000, 'P003', 'E002'),
-(400000, 'P005', 'E001');
-
-INSERT INTO vendedor (carnet, direccion, fkcodpersona) VALUES
-(1001, 'Calle 10 #5-33', 'P002'),
-(1002, 'Carrera 15 #7-20', 'P004'),
-(1003, 'Avenida 30 #18-09', 'P006');
-
+-- Productos (stocks ya ajustados post-facturas, igual que SQL Server/PostgreSQL)
 INSERT INTO producto (codigo, nombre, stock, valorunitario) VALUES
-('PR001', 'Laptop Lenovo IdeaPad', 20, 2500000),
-('PR002', 'Monitor Samsung 24"', 30, 800000),
-('PR003', 'Teclado Logitech K380', 50, 150000),
-('PR004', 'Mouse HP', 60, 90000),
-('PR005', 'Impresora Epson EcoTank', 15, 1100000),
-('PR006', 'Auriculares Sony WH-CH510', 25, 240000),
-('PR007', 'Tablet Samsung Tab A9', 18, 950000),
-('PR008', 'Disco Duro Seagate 1TB', 35, 280000);
+('PR001', 'Laptop Lenovo IdeaPad', 17, 2500000),
+('PR002', 'Monitor Samsung 24"', 27, 800000),
+('PR003', 'Teclado Logitech K380', 42, 150000),
+('PR004', 'Mouse HP', 55, 90000),
+('PR005', 'Impresora Epson EcoTank1', 14, 1100000),
+('PR006', 'Auriculares Sony WH-CH510', 23, 240000),
+('PR007', 'Tablet Samsung Tab A9', 15, 950000),
+('PR008', 'Disco Duro Seagate 1TB', 32, 280000);
 
--- Usuarios (formato JSON: [{"fkidrol":1}, {"fkidrol":2}])
-CALL crear_usuario_con_roles('admin@correo.com', 'admin123', '[{"fkidrol":1}]');
-CALL crear_usuario_con_roles('vendedor1@correo.com', 'vend123', '[{"fkidrol":2},{"fkidrol":3}]');
-CALL crear_usuario_con_roles('jefe@correo.com', 'jefe123', '[{"fkidrol":1},{"fkidrol":3},{"fkidrol":4}]');
-CALL crear_usuario_con_roles('cliente1@correo.com', 'cli123', '[{"fkidrol":5}]');
-CALL crear_usuario_con_roles('carlos.castro@usbmed.edu.co', '1234567', '[{"fkidrol":1},{"fkidrol":2},{"fkidrol":3},{"fkidrol":4},{"fkidrol":5}]');
-CALL crear_usuario_con_roles('carloscastro5033@correo.itm.edu.co', '1234567', '[{"fkidrol":1},{"fkidrol":2},{"fkidrol":3},{"fkidrol":4},{"fkidrol":5}]');
+-- Roles (con IDs explícitos)
+INSERT INTO rol (id, nombre) VALUES
+(1, 'Administrador'),
+(2, 'Vendedor'),
+(3, 'Cajero'),
+(4, 'Contador'),
+(5, 'Cliente');
 
--- Facturas
-CALL crear_factura_con_detalle(1, 1, '2025-10-15 00:00:00', '[{"fkcodproducto":"PR001","cantidad":1},{"fkcodproducto":"PR004","cantidad":2}]', 1);
-CALL crear_factura_con_detalle(2, 2, '2025-10-16 00:00:00', '[{"fkcodproducto":"PR002","cantidad":2},{"fkcodproducto":"PR005","cantidad":1}]', 1);
-CALL crear_factura_con_detalle(3, 3, '2025-10-17 00:00:00', '[{"fkcodproducto":"PR003","cantidad":3},{"fkcodproducto":"PR007","cantidad":1}]', 1);
-
--- Rutas del sistema
+-- Rutas
 INSERT INTO ruta (ruta, descripcion) VALUES
 ('/home', 'Página principal - Dashboard'),
 ('/usuario', 'Gestión de usuarios'),
@@ -703,7 +1055,188 @@ INSERT INTO ruta (ruta, descripcion) VALUES
 ('/ruta/crear', 'Crear ruta (POST)'),
 ('/ruta/eliminar', 'Eliminar ruta (POST)');
 
--- Rutas por rol (fkidruta, fkidrol)
+-- Usuarios (con hashes BCrypt identicos a SQL Server/PostgreSQL)
+INSERT INTO usuario (email, contrasena) VALUES
+('admin@correo.com', '$2a$12$3UgI.Eof.FhzsYUWESI9n.qFaqkV2JPhvW3L/1GTKowNJnGaD8F.G'),
+('vendedor1@correo.com', '$2a$12$Dgog4VaHqMzhliPVJy1BcOMd6.izEGNeRDtZ.O7SPmBLc6UVthVTG'),
+('jefe@correo.com', 'jefe123'),
+('cliente1@correo.com', 'cli123'),
+('test_encript@correo.com', '$2a$11$Ci0J2yBltDgQHfjadgkl0OtbcF5pUf97vTq/4Xr0KEU/86l8ybjBe'),
+('nuevo@correo.com', '$2a$11$cmtGBxllwc7MCzpnKVSWuumiOgCaG6PaKWcN1z9N0bjjnkobbFDzO'),
+('carlos.castro@usbmed.edu.co', '$2a$10$YYl6bHCflCnk8suUrms3ie.rnpLvfD9nHJtehZwhcSkINelGwt6iC'),
+('carloscastro5033@correo.itm.edu.co', '$2a$10$YYl6bHCflCnk8suUrms3ie.rnpLvfD9nHJtehZwhcSkINelGwt6iC');
+
+-- Clientes (con IDs explícitos, incluyendo id=5 saltando id=4)
+INSERT INTO cliente (id, credito, fkcodpersona, fkcodempresa) VALUES
+(1, 520000, 'P001', 'E001'),
+(2, 250000, 'P003', 'E002'),
+(3, 400000, 'P005', 'E001'),
+(5, 700000, 'P006', 'E001');
+
+-- Actualizar AUTO_INCREMENT de cliente
+ALTER TABLE cliente AUTO_INCREMENT = 6;
+
+-- Vendedores (con IDs explícitos)
+INSERT INTO vendedor (id, carnet, direccion, fkcodpersona) VALUES
+(1, 1001, 'Calle 10 #5-33', 'P002'),
+(2, 1002, 'Carrera 15 #7-20', 'P004'),
+(3, 1003, 'Avenida 30 #18-09', 'P006');
+
+-- Actualizar AUTO_INCREMENT de vendedor
+ALTER TABLE vendedor AUTO_INCREMENT = 4;
+
+-- ============================================================
+-- DATOS DE FACTURAS (con triggers deshabilitados para carga semilla)
+-- Los stocks ya fueron insertados post-ajuste arriba, asi que
+-- deshabilitamos triggers para no descontar de nuevo.
+-- MySQL no tiene DISABLE TRIGGER, asi que los eliminamos y recreamos.
+-- ============================================================
+
+-- Eliminar triggers temporalmente
+DROP TRIGGER IF EXISTS trg_prodfact_before_insert;
+DROP TRIGGER IF EXISTS trg_prodfact_after_insert;
+DROP TRIGGER IF EXISTS trg_prodfact_before_update;
+DROP TRIGGER IF EXISTS trg_prodfact_after_update;
+DROP TRIGGER IF EXISTS trg_prodfact_before_delete;
+DROP TRIGGER IF EXISTS trg_prodfact_after_delete;
+
+-- Facturas (con IDs explícitos)
+INSERT INTO factura (numero, fecha, total, fkidcliente, fkidvendedor) VALUES
+(1, '2025-12-03 12:57:19', 5000000, 1, 1),
+(2, '2025-12-03 12:57:19', 1250000, 2, 2),
+(3, '2025-12-03 12:57:19', 2030000, 3, 3),
+(4, '2025-12-03 13:04:59', 950000, 1, 1),
+(5, '2025-12-03 13:05:17', 2740000, 2, 2),
+(6, '2025-12-03 13:05:35', 4850000, 3, 3);
+
+-- Actualizar AUTO_INCREMENT de factura
+ALTER TABLE factura AUTO_INCREMENT = 7;
+
+-- Productos por factura (subtotales directos, sin triggers)
+INSERT INTO productosporfactura (fknumfactura, fkcodproducto, cantidad, subtotal) VALUES
+(1, 'PR001', 2, 5000000),
+(2, 'PR002', 1, 800000),
+(2, 'PR003', 3, 450000),
+(3, 'PR004', 5, 450000),
+(3, 'PR005', 1, 1100000),
+(3, 'PR006', 2, 480000),
+(4, 'PR007', 1, 950000),
+(5, 'PR007', 2, 1900000),
+(5, 'PR008', 3, 840000),
+(6, 'PR001', 1, 2500000),
+(6, 'PR002', 2, 1600000),
+(6, 'PR003', 5, 750000);
+
+-- Recrear triggers
+DELIMITER $$
+
+CREATE TRIGGER trg_prodfact_before_insert
+BEFORE INSERT ON productosporfactura
+FOR EACH ROW
+BEGIN
+    DECLARE v_precio DECIMAL(18,2);
+    DECLARE v_stock INT;
+    DECLARE v_msg VARCHAR(500);
+
+    SELECT valorunitario, stock INTO v_precio, v_stock
+    FROM producto WHERE codigo = NEW.fkcodproducto;
+
+    IF v_stock < NEW.cantidad THEN
+        SET v_msg = CONCAT('Stock insuficiente para producto ', NEW.fkcodproducto,
+            '. Stock disponible: ', v_stock, ', cantidad solicitada: ', NEW.cantidad);
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    SET NEW.subtotal = NEW.cantidad * v_precio;
+    UPDATE producto SET stock = stock - NEW.cantidad WHERE codigo = NEW.fkcodproducto;
+END$$
+
+CREATE TRIGGER trg_prodfact_after_insert
+AFTER INSERT ON productosporfactura
+FOR EACH ROW
+BEGIN
+    UPDATE factura
+    SET total = (SELECT COALESCE(SUM(subtotal), 0) FROM productosporfactura WHERE fknumfactura = NEW.fknumfactura)
+    WHERE numero = NEW.fknumfactura;
+END$$
+
+CREATE TRIGGER trg_prodfact_before_update
+BEFORE UPDATE ON productosporfactura
+FOR EACH ROW
+BEGIN
+    DECLARE v_precio DECIMAL(18,2);
+    DECLARE v_stock INT;
+    DECLARE v_msg VARCHAR(500);
+
+    SELECT valorunitario INTO v_precio FROM producto WHERE codigo = NEW.fkcodproducto;
+    SELECT stock INTO v_stock FROM producto WHERE codigo = NEW.fkcodproducto;
+
+    IF v_stock + OLD.cantidad < NEW.cantidad THEN
+        SET v_msg = CONCAT('Stock insuficiente para producto ', NEW.fkcodproducto,
+            '. Stock disponible: ', v_stock + OLD.cantidad, ', cantidad solicitada: ', NEW.cantidad);
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    SET NEW.subtotal = NEW.cantidad * v_precio;
+    UPDATE producto
+    SET stock = stock + OLD.cantidad - NEW.cantidad
+    WHERE codigo = NEW.fkcodproducto;
+END$$
+
+CREATE TRIGGER trg_prodfact_after_update
+AFTER UPDATE ON productosporfactura
+FOR EACH ROW
+BEGIN
+    UPDATE factura
+    SET total = (SELECT COALESCE(SUM(subtotal), 0) FROM productosporfactura WHERE fknumfactura = NEW.fknumfactura)
+    WHERE numero = NEW.fknumfactura;
+END$$
+
+CREATE TRIGGER trg_prodfact_before_delete
+BEFORE DELETE ON productosporfactura
+FOR EACH ROW
+BEGIN
+    UPDATE producto
+    SET stock = stock + OLD.cantidad
+    WHERE codigo = OLD.fkcodproducto;
+END$$
+
+CREATE TRIGGER trg_prodfact_after_delete
+AFTER DELETE ON productosporfactura
+FOR EACH ROW
+BEGIN
+    UPDATE factura
+    SET total = (SELECT COALESCE(SUM(subtotal), 0) FROM productosporfactura WHERE fknumfactura = OLD.fknumfactura)
+    WHERE numero = OLD.fknumfactura;
+END$$
+
+DELIMITER ;
+
+-- Roles por usuario
+INSERT INTO rol_usuario (fkemail, fkidrol) VALUES
+('admin@correo.com', 1),
+('vendedor1@correo.com', 2),
+('vendedor1@correo.com', 3),
+('jefe@correo.com', 1),
+('jefe@correo.com', 3),
+('jefe@correo.com', 4),
+('cliente1@correo.com', 5),
+('test_encript@correo.com', 1),
+('nuevo@correo.com', 1),
+('nuevo@correo.com', 2),
+('nuevo@correo.com', 3),
+('carlos.castro@usbmed.edu.co', 1),
+('carlos.castro@usbmed.edu.co', 2),
+('carlos.castro@usbmed.edu.co', 3),
+('carlos.castro@usbmed.edu.co', 4),
+('carlos.castro@usbmed.edu.co', 5),
+('carloscastro5033@correo.itm.edu.co', 1),
+('carloscastro5033@correo.itm.edu.co', 2),
+('carloscastro5033@correo.itm.edu.co', 3),
+('carloscastro5033@correo.itm.edu.co', 4),
+('carloscastro5033@correo.itm.edu.co', 5);
+
+-- Rutas por rol
 -- Rutas: 1=/home,2=/usuarios,3=/facturas,4=/clientes,5=/vendedores,6=/personas,7=/empresas,8=/productos,9=/roles,10=/permisos,11=/permisos/crear,12=/permisos/eliminar,13=/rutas,14=/rutas/crear,15=/rutas/eliminar
 -- Roles: 1=Administrador,2=Vendedor,3=Cajero,4=Contador,5=Cliente
 INSERT INTO rutarol (fkidruta, fkidrol) VALUES
@@ -712,13 +1245,3 @@ INSERT INTO rutarol (fkidruta, fkidrol) VALUES
 (1, 3), (3, 3),
 (1, 4), (4, 4), (8, 4),
 (1, 5), (8, 5);
-
--- ================================================================
--- VERIFICACIÓN Y CONSULTAS DE EJEMPLO
--- ================================================================
--- Para verificar que todo está correcto:
--- SELECT * FROM factura;
--- SELECT * FROM productosporfactura;
--- SELECT * FROM producto;
--- CALL consultar_factura_con_detalle(1, @resultado);
--- SELECT @resultado;
