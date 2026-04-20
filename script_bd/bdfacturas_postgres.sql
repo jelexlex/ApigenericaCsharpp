@@ -80,6 +80,7 @@ CREATE TABLE factura (
     numero SERIAL NOT NULL,
     fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     total NUMERIC NOT NULL DEFAULT 0,
+    estado VARCHAR(10) NOT NULL DEFAULT 'activa',
     fkidcliente INTEGER NOT NULL,
     fkidvendedor INTEGER NOT NULL,
     CONSTRAINT pk_factura PRIMARY KEY (numero),
@@ -378,7 +379,7 @@ BEGIN
     SELECT json_build_object(
         'factura', (
             SELECT row_to_json(fac) FROM (
-                SELECT f.numero, f.fecha, f.total, f.fkidcliente, f.fkidvendedor
+                SELECT f.numero, f.fecha, f.total, f.estado, f.fkidcliente, f.fkidvendedor
                 FROM factura f WHERE f.numero = v_numero
             ) fac
         ),
@@ -420,6 +421,7 @@ BEGIN
             'numero', f.numero,
             'fecha', f.fecha,
             'total', f.total,
+            'estado', f.estado,
             'fkidcliente', f.fkidcliente,
             'nombre_cliente', pc.nombre,
             'fkidvendedor', f.fkidvendedor,
@@ -467,6 +469,7 @@ BEGIN
             'numero', f.numero,
             'fecha', f.fecha,
             'total', f.total,
+            'estado', f.estado,
             'fkidcliente', f.fkidcliente,
             'nombre_cliente', pc.nombre,
             'fkidvendedor', f.fkidvendedor,
@@ -554,7 +557,7 @@ BEGIN
     SELECT json_build_object(
         'factura', (
             SELECT row_to_json(fac) FROM (
-                SELECT f.numero, f.fecha, f.total, f.fkidcliente, f.fkidvendedor
+                SELECT f.numero, f.fecha, f.total, f.estado, f.fkidcliente, f.fkidvendedor
                 FROM factura f WHERE f.numero = p_numero
             ) fac
         ),
@@ -610,6 +613,65 @@ BEGIN
         'numero_eliminado', p_numero,
         'total_eliminado', v_total,
         'productos_eliminados', v_cantidad_productos
+    );
+END;
+$$;
+
+-- ------------------------------------------------------------
+-- 6. SP ANULAR FACTURA (borrado lógico)
+-- Cambia el estado de la factura a 'anulada' y restaura el stock
+-- de todos los productos. NO elimina la factura de la BD.
+-- El borrado físico (DELETE) solo lo puede hacer el admin via
+-- sp_borrar_factura_y_productosporfactura.
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "sp_anular_factura",
+--     "p_numero": 1, "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE OR REPLACE PROCEDURE sp_anular_factura(
+    IN p_numero INTEGER,
+    INOUT p_resultado JSON DEFAULT NULL
+)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_total NUMERIC;
+    v_cantidad_productos BIGINT;
+    v_estado VARCHAR(10);
+BEGIN
+    -- Validar que la factura existe
+    IF NOT EXISTS (SELECT 1 FROM factura WHERE factura.numero = p_numero) THEN
+        RAISE EXCEPTION 'Factura % no existe', p_numero;
+    END IF;
+
+    -- Validar que no esté ya anulada
+    SELECT estado INTO v_estado FROM factura WHERE factura.numero = p_numero;
+    IF v_estado = 'anulada' THEN
+        RAISE EXCEPTION 'Factura % ya está anulada', p_numero;
+    END IF;
+
+    -- Restaurar stock de todos los productos de la factura
+    UPDATE producto p
+    SET stock = p.stock + pf.cantidad
+    FROM productosporfactura pf
+    WHERE p.codigo = pf.fkcodproducto AND pf.fknumfactura = p_numero;
+
+    -- Guardar info para la respuesta
+    SELECT COUNT(*) INTO v_cantidad_productos
+    FROM productosporfactura WHERE fknumfactura = p_numero;
+
+    SELECT f.total INTO v_total FROM factura f WHERE f.numero = p_numero;
+
+    -- Cambiar estado a 'anulada'
+    UPDATE factura SET estado = 'anulada' WHERE factura.numero = p_numero;
+
+    -- Retornar resultado como JSON
+    p_resultado := json_build_object(
+        'mensaje', 'Factura anulada exitosamente',
+        'numero_anulado', p_numero,
+        'total_anulado', v_total,
+        'productos_afectados', v_cantidad_productos,
+        'estado', 'anulada'
     );
 END;
 $$;

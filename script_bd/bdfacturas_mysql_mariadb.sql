@@ -25,6 +25,7 @@ DROP PROCEDURE IF EXISTS sp_consultar_factura_y_productosporfactura;
 DROP PROCEDURE IF EXISTS sp_listar_facturas_y_productosporfactura;
 DROP PROCEDURE IF EXISTS sp_actualizar_factura_y_productosporfactura;
 DROP PROCEDURE IF EXISTS sp_borrar_factura_y_productosporfactura;
+DROP PROCEDURE IF EXISTS sp_anular_factura;
 -- Limpiar nombres viejos (versiones anteriores del script)
 DROP PROCEDURE IF EXISTS crear_factura_con_detalle;
 DROP PROCEDURE IF EXISTS consultar_factura_con_detalle;
@@ -127,6 +128,7 @@ CREATE TABLE factura (
     numero INT AUTO_INCREMENT NOT NULL,
     fecha TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     total DECIMAL(18,2) NOT NULL DEFAULT 0,
+    estado VARCHAR(10) NOT NULL DEFAULT 'activa',
     fkidcliente INT NOT NULL,
     fkidvendedor INT NOT NULL,
     CONSTRAINT pk_factura PRIMARY KEY (numero),
@@ -331,6 +333,7 @@ BEGIN
         '{"numero":', f.numero,
         ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%dT%H:%i:%s'), '"',
         ',"total":', f.total,
+        ',"estado":"', f.estado, '"',
         ',"fkidcliente":', f.fkidcliente,
         ',"fkidvendedor":', f.fkidvendedor, '}'
     ) INTO v_factura_json
@@ -393,6 +396,7 @@ BEGIN
         '{"factura":{"numero":', f.numero,
         ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%dT%H:%i:%s'), '"',
         ',"total":', f.total,
+        ',"estado":"', f.estado, '"',
         ',"fkidcliente":', f.fkidcliente,
         ',"nombre_cliente":"', pc.nombre, '"',
         ',"fkidvendedor":', f.fkidvendedor,
@@ -547,6 +551,7 @@ BEGIN
         '{"numero":', f.numero,
         ',"fecha":"', DATE_FORMAT(f.fecha, '%Y-%m-%dT%H:%i:%s'), '"',
         ',"total":', f.total,
+        ',"estado":"', f.estado, '"',
         ',"fkidcliente":', f.fkidcliente,
         ',"fkidvendedor":', f.fkidvendedor, '}'
     ) INTO v_factura_json
@@ -608,6 +613,63 @@ BEGIN
         'numero_eliminado', p_numero,
         'total_eliminado', v_total,
         'productos_eliminados', v_cantidad_productos
+    );
+END$$
+
+-- ------------------------------------------------------------
+-- 6. SP ANULAR FACTURA (borrado lógico)
+-- Cambia el estado de la factura a 'anulada' y restaura el stock
+-- de todos los productos. NO elimina la factura de la BD.
+-- El borrado físico (DELETE) solo lo puede hacer el admin via
+-- sp_borrar_factura_y_productosporfactura.
+-- Ejemplo via API:
+--   POST /api/procedimientos/ejecutarsp
+--   { "nombreSP": "sp_anular_factura",
+--     "p_numero": 1, "p_resultado": null }
+-- ------------------------------------------------------------
+CREATE PROCEDURE sp_anular_factura(
+    IN p_numero INT,
+    OUT p_resultado JSON
+)
+BEGIN
+    DECLARE v_total DECIMAL(18,2);
+    DECLARE v_cantidad_productos INT;
+    DECLARE v_estado VARCHAR(10);
+    DECLARE v_msg VARCHAR(500);
+
+    -- Validar que la factura existe
+    IF NOT EXISTS (SELECT 1 FROM factura WHERE numero = p_numero) THEN
+        SET v_msg = CONCAT('Factura ', p_numero, ' no existe');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Validar que no esté ya anulada
+    SELECT estado INTO v_estado FROM factura WHERE numero = p_numero;
+    IF v_estado = 'anulada' THEN
+        SET v_msg = CONCAT('Factura ', p_numero, ' ya está anulada');
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = v_msg;
+    END IF;
+
+    -- Restaurar stock de todos los productos de la factura
+    UPDATE producto p
+    JOIN productosporfactura pf ON p.codigo = pf.fkcodproducto
+    SET p.stock = p.stock + pf.cantidad
+    WHERE pf.fknumfactura = p_numero;
+
+    -- Guardar info para la respuesta
+    SELECT total INTO v_total FROM factura WHERE numero = p_numero;
+    SELECT COUNT(*) INTO v_cantidad_productos FROM productosporfactura WHERE fknumfactura = p_numero;
+
+    -- Cambiar estado a 'anulada'
+    UPDATE factura SET estado = 'anulada' WHERE numero = p_numero;
+
+    -- Retornar resultado como JSON
+    SET p_resultado = JSON_OBJECT(
+        'mensaje', 'Factura anulada exitosamente',
+        'numero_anulado', p_numero,
+        'total_anulado', v_total,
+        'productos_afectados', v_cantidad_productos,
+        'estado', 'anulada'
     );
 END$$
 
