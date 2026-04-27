@@ -544,7 +544,127 @@ public async Task<BulkResult> CrearMasivoAsync(string tabla, List<Dictionary<str
 
 ---
 
-### 11. Como Agregar un Nuevo Motor de Base de Datos (ej: Oracle)
+### 11. Documentacion Swagger Expuesta en Produccion
+
+**Que es Swagger/OpenAPI:** Es la interfaz grafica que documenta todos los endpoints de la API, como llamarlos y que parametros reciben.
+
+**Problema:** En `Program.cs`, el middleware `app.UseSwaggerUI()` se ejecuta siempre, sin importar el entorno. En produccion, esto le da a cualquier atacante un "mapa" exacto de la API (endpoints, metodos, esquemas), facilitando la busqueda de vulnerabilidades.
+
+**Solucion:** Restringir Swagger y ReDoc solo al entorno de desarrollo:
+
+```csharp
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+    app.UseSwagger();
+    app.UseSwaggerUI(c => ...);
+    app.UseReDoc(c => ...);
+}
+```
+
+---
+
+### 12. Inyeccion SQL en Nombres de Tablas/Columnas
+
+**Que es la inyeccion SQL estructural:** Las consultas parametrizadas (`@param`) protegen los valores, pero en SQL estandar no se pueden parametrizar los nombres de tablas ni de columnas.
+
+**Problema:** Al ser una API generica (`/api/{tabla}`), si un atacante envia una peticion a `/api/producto; DROP TABLE usuarios--` y el codigo concatena el nombre directamente en el SQL (`SELECT * FROM {tabla}`), la base de datos podria ejecutar el comando malicioso.
+
+**Relacion con item 8.1:** La whitelist de tablas ya previene este ataque para tablas. Sin embargo, aplicar validacion por regex como defensa adicional (defense-in-depth) sobre todos los identificadores (tablas, columnas, esquemas) es la practica recomendada:
+
+```csharp
+// Validar que el nombre solo contenga letras, numeros y guiones bajos:
+if (!Regex.IsMatch(tabla, @"^[a-zA-Z0-9_]+$"))
+{
+    throw new ArgumentException("Nombre de tabla invalido");
+}
+```
+
+---
+
+### 13. Falta de Endpoints de Salud (Health Checks)
+
+**Que son los Health Checks:** Son endpoints ligeros (usualmente `/health`) que devuelven `200 OK` si la API y la base de datos estan funcionando correctamente.
+
+**Problema:** Si la API se despliega en Docker, Kubernetes o detras de un balanceador de carga, la infraestructura no tiene una forma estandarizada de saber si la aplicacion se cayo o perdio conexion con la BD para reiniciarla automaticamente.
+
+**Solucion:** Habilitar el middleware nativo de ASP.NET Core:
+
+```csharp
+// En Program.cs (servicios):
+builder.Services.AddHealthChecks()
+       .AddSqlServer(builder.Configuration.GetConnectionString("SqlServer"));
+
+// En Program.cs (middleware):
+app.MapHealthChecks("/health");
+```
+
+---
+
+### 14. Compresion de Respuestas Desactivada
+
+**Que es Response Compression:** Permite que el servidor comprima (usando GZIP o Brotli) el JSON antes de enviarlo por la red, y el cliente lo descomprime al recibirlo.
+
+**Problema:** Un endpoint `/api/productos` que devuelva 10.000 registros puede pesar 5 MB en texto plano. Sin compresion, las respuestas consumen mucho ancho de banda y hacen que la API sea lenta en conexiones moviles o inestables.
+
+**Solucion:** Agregar el middleware de compresion para reducir el tamano hasta en un 80%:
+
+```csharp
+// En Program.cs (servicios):
+builder.Services.AddResponseCompression(options => {
+    options.EnableForHttps = true;
+});
+
+// En Program.cs (middleware - antes de los controllers):
+app.UseResponseCompression();
+```
+
+---
+
+### 15. Sin Soporte para Refresh Tokens
+
+**Que es un Refresh Token:** Los tokens JWT deben tener un tiempo de vida corto (15-60 min) por seguridad. Un Refresh Token permite obtener un nuevo JWT sin que el usuario tenga que volver a escribir su contrasena, mejorando la experiencia de usuario.
+
+**Problema:** La configuracion actual de JWT solo emite un token valido por 60 minutos. Cuando expira, las peticiones del frontend fallan con `401 Unauthorized`, forzando al usuario a iniciar sesion abruptamente en medio de su trabajo.
+
+**Solucion:**
+
+1. Generar un `RefreshToken` (cadena aleatoria larga) en el Login y guardarlo en la BD junto con el usuario y su fecha de expiracion (ej. 7 dias).
+2. Crear un endpoint `POST /api/autenticacion/refresh` que reciba el token expirado y el RefreshToken, los valide, y devuelva un nuevo par de tokens.
+
+```csharp
+// Estructura de la tabla refresh_tokens:
+// CREATE TABLE refresh_tokens (
+//     id INT PRIMARY KEY IDENTITY,
+//     usuario VARCHAR(100),
+//     token VARCHAR(500),
+//     expira DATETIME,
+//     revocado BIT DEFAULT 0
+// );
+```
+
+---
+
+### 16. Ausencia de Versionado de API
+
+**Que es el versionado:** Es la practica de incluir la version en la URL (ej. `/api/v1/producto`) o en los headers.
+
+**Problema:** Si en el futuro se cambia la estructura de respuesta JSON o los nombres de las rutas, se romperan todas las aplicaciones frontend o moviles existentes que consumen la API actual.
+
+**Solucion:** Implementar `Microsoft.AspNetCore.Mvc.Versioning` para asegurar compatibilidad hacia atras:
+
+```csharp
+builder.Services.AddApiVersioning(config => {
+    config.DefaultApiVersion = new ApiVersion(1, 0);
+    config.AssumeDefaultVersionWhenUnspecified = true;
+});
+// Y cambiar los controllers a:
+// [Route("api/v{version:apiVersion}/[controller]")]
+```
+
+---
+
+### 17. Como Agregar un Nuevo Motor de Base de Datos (ej: Oracle)
 
 **Que es la inyeccion de dependencias (DI):** Es un patron donde las clases no crean sus dependencias directamente, sino que las reciben "inyectadas" desde afuera. En esta API, los controllers no saben si estan hablando con SQL Server, PostgreSQL u Oracle. Solo conocen la **interface** (`IRepositorioLecturaTabla`). Al arrancar la aplicacion, `Program.cs` decide cual implementacion concreta inyectar segun la configuracion.
 
@@ -704,7 +824,7 @@ Este es el beneficio del **Principio de Abierto/Cerrado (OCP)**: la API esta **a
 
 ---
 
-### 12. Uso Empresarial: Arquitectura Hibrida (Generico + Dedicado)
+### 18. Uso Empresarial: Arquitectura Hibrida (Generico + Dedicado)
 
 #### Para que sirve esta API hoy
 
@@ -878,7 +998,7 @@ Esto da lo mejor de ambos mundos: velocidad de desarrollo del generico + rendimi
 
 ---
 
-### 13. Resumen y Prioridades
+### 19. Resumen y Prioridades
 
 | Prioridad | Que hacer | Esfuerzo |
 |-----------|-----------|----------|
@@ -897,6 +1017,12 @@ Esto da lo mejor de ambos mundos: velocidad de desarrollo del generico + rendimi
 | **Mediano plazo** | Implementar operaciones masivas (bulk insert/update/delete) | Alto |
 | **Largo plazo** | Implementar RBAC por tabla/campo/fila | Alto |
 | **Largo plazo** | Agregar response caching con invalidacion | Alto |
+| **Inmediato** | Restringir Swagger/ReDoc solo al entorno de desarrollo | Bajo |
+| **Inmediato** | Agregar validacion regex a nombres de tabla/columna (defense-in-depth) | Bajo |
+| **Corto plazo** | Habilitar Health Checks (`/health`) para Docker/Kubernetes | Bajo |
+| **Corto plazo** | Activar compresion de respuestas GZIP/Brotli | Bajo |
+| **Mediano plazo** | Implementar Refresh Tokens para evitar re-login forzado | Medio |
+| **Mediano plazo** | Agregar versionado de API (`/api/v1/`) | Medio |
 
 ---
 
