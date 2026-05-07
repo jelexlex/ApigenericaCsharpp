@@ -1128,6 +1128,7 @@ namespace ApiGenericaCsharp.Controllers
         /// Ejemplo: POST /api/usuario/verificar-contrasena
         /// </summary>
         [AllowAnonymous]
+        
         [HttpPost("verificar-contrasena")]
         public async Task<IActionResult> VerificarContrasenaAsync(
             string tabla,                                                    // Del path: /api/{tabla}
