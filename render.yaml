@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: api-innovacion
+    runtime: dotnet
+    buildCommand: dotnet publish -c Release -o out
+    startCommand: dotnet out/ApiGenericaCsharp.dll
+    envVars:
+      - key: ConnectionStrings__Postgres
+        sync: false
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+
+        
